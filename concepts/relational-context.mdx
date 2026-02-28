@@ -1,0 +1,354 @@
+---
+title: 'Relational Context Gathering'
+description: 'Deep dive into the -r flag and how splat builds dependency graphs to gather comprehensive error context'
+---
+
+## What is Relational Context?
+
+Relational context gathering is splat's ability to automatically discover and include all files that are related to an error through import relationships. When you use the `-r` flag, splat doesn't just analyze the files mentioned in the error stack—it recursively traverses your codebase's dependency graph to find **all** files connected through Nth-degree imports.
+
+<Tabs>
+  <Tab title="Without -r">
+    ```python
+    # Only analyzes files in error traceback
+    splat 'python3 app.py'
+    # Analyzes: app.py only
+    ```
+  </Tab>
+  <Tab title="With -r">
+    ```python
+    # Analyzes error files + all imported dependencies
+    splat -r 'python3 app.py'
+    # Analyzes: app.py, utils.py, config.py, helpers.py, etc.
+    ```
+  </Tab>
+</Tabs>
+
+## How It Works
+
+The relational context system operates in three phases:
+
+### Phase 1: Build Adjacency List
+
+When the `-r` flag is detected, splat builds a complete dependency graph using `build_adjacency_list()` (`utils.py:130-189`).
+
+```python
+if flag == '-r':
+    graph = build_adjacency_list(collected_traceback_files, project_root)
+    all_related_files = get_nth_related_files(collected_traceback_files, graph)
+```
+
+#### Adjacency List Construction
+
+The adjacency list is a dictionary where each file maps to its imported dependencies:
+
+```python
+{
+  '/path/to/app.py': ['/path/to/utils.py', '/path/to/config.py'],
+  '/path/to/utils.py': ['/path/to/helpers.py'],
+  '/path/to/config.py': ['/path/to/constants.py'],
+  '/path/to/helpers.py': []
+}
+```
+
+<Accordion title="Building Process (from utils.py:130-189)">
+The `build_adjacency_list` function:
+
+1. **Parse each Python file** using the `ast` module to find import statements
+2. **Extract import names** from `ast.Import` and `ast.ImportFrom` nodes
+3. **Resolve module paths** by checking multiple locations:
+   - Same directory as the importing file
+   - Project root directory
+   - Nested package structures (handling dotted imports)
+4. **Recursively process imports** to build the complete graph
+5. **Filter project files** to include only files within project boundaries
+
+```python
+def build_adjacency_list(files: List[str], project_root: str) -> Dict[str, List[str]]:
+    adjacency_list = {}
+    processed_files = set()
+    
+    def process_file(file: str):
+        if file in processed_files or not is_project_file(file, project_root):
+            return
+        
+        processed_files.add(file)
+        imports = set()
+        
+        # Parse AST to find imports
+        with open(file, 'r') as f:
+            tree = ast.parse(f.read())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports.update(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imports.add(node.module)
+        
+        # Resolve and recursively process imports
+        adjacency_list[file] = []
+        for imp in imports:
+            # Resolve module path and add to adjacency list
+            # Recursively process the imported file
+```
+</Accordion>
+
+### Phase 2: Traverse Graph (Nth Degree Connections)
+
+Once the adjacency list is built, `get_nth_related_files()` performs a breadth-first search to find all connected files (`utils.py:108-122`).
+
+```python
+def get_nth_related_files(start_files: List[str], graph: Dict[str, List[str]]) -> Set[str]:
+    related_files = set(start_files)
+    planned_visit = list(start_files)
+    possible_files = set()
+    
+    while planned_visit:
+        current = planned_visit.pop(0)
+        possible_files.add(current)
+        
+        for neighbor in graph.get(current, []):
+            if neighbor not in related_files:
+                related_files.add(neighbor)
+                planned_visit.append(neighbor)
+    
+    return possible_files
+```
+
+<Steps>
+  <Step title="Initialize">
+    Start with files from the error traceback
+  </Step>
+  <Step title="Visit">
+    Pop the first file from the queue
+  </Step>
+  <Step title="Expand">
+    Add all its imports (neighbors) to the queue
+  </Step>
+  <Step title="Track">
+    Mark as visited to avoid infinite loops
+  </Step>
+  <Step title="Repeat">
+    Continue until queue is empty
+  </Step>
+</Steps>
+
+### Phase 3: Package Context
+
+All discovered files are packaged using `run_mock_repopack()` (`utils.py:81-100`):
+
+```python
+return traceback, error_information, run_mock_repopack(list(all_related_files))
+```
+
+This function reads each file's contents and formats them for LLM consumption:
+
+```python
+def run_mock_repopack(paths: List[str], style: str = 'json') -> str:
+    result = []
+    for path in paths:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                content = f.read()
+            result.append(f"File: {path}\nContent:\n{content}\n")
+    
+    return "\n" + "="*50 + "\n".join(result) + "="*50 + "\n"
+```
+
+## Import Resolution Strategy
+
+Splat handles various Python import patterns:
+
+<CardGroup cols={2}>
+  <Card title="Absolute Imports" icon="arrow-right">
+    ```python
+    import utils
+    from config import settings
+    ```
+    Resolved from project root
+  </Card>
+  <Card title="Relative Imports" icon="arrow-up-right-from-square">
+    ```python
+    from .utils import helper
+    from ..config import DB
+    ```
+    Resolved from file's directory
+  </Card>
+  <Card title="Nested Packages" icon="folder">
+    ```python
+    from api.routes.users import get_user
+    ```
+    Resolved as `api/routes/users.py`
+  </Card>
+  <Card title="Multiple Paths" icon="route">
+    Checks both:
+    - Same directory as importing file
+    - Project root directory
+  </Card>
+</CardGroup>
+
+### Module Path Resolution (`utils.py:162-177`)
+
+```python
+for imp in imports:
+    module_paths = []
+    if '.' in imp:
+        # Handle nested packages: api.routes -> api/routes.py
+        module_paths.append(os.path.join(project_root, *imp.split('.')) + '.py')
+    else:
+        # Check multiple locations
+        module_paths.extend([
+            os.path.join(file_dir, f"{imp}.py"),      # Same directory
+            os.path.join(project_root, f"{imp}.py")   # Project root
+        ])
+    
+    for module_path in module_paths:
+        if os.path.exists(module_path):
+            adjacency_list[file].append(module_path)
+            process_file(module_path)  # Recursive traversal
+            break
+```
+
+## When to Use Relational Context
+
+<Tabs>
+  <Tab title="Use -r when...">
+    <Icon icon="check" /> Error involves cross-file logic
+    
+    <Icon icon="check" /> Bug might be in imported dependencies
+    
+    <Icon icon="check" /> Need to understand module interactions
+    
+    <Icon icon="check" /> Working with complex, multi-file features
+    
+    <Icon icon="check" /> Error message lacks clear root cause
+  </Tab>
+  <Tab title="Skip -r when...">
+    <Icon icon="xmark" /> Error is clearly in a single file
+    
+    <Icon icon="xmark" /> Syntax errors or simple typos
+    
+    <Icon icon="xmark" /> Very large codebases (see performance notes)
+    
+    <Icon icon="xmark" /> Testing specific file changes
+    
+    <Icon icon="xmark" /> Quick debugging iterations
+  </Tab>
+</Tabs>
+
+## Performance Considerations
+
+### Token Usage
+
+Relational context gathering can significantly increase the amount of code sent to the LLM:
+
+<Warning>
+Each file's complete contents are included in the LLM prompt. For large codebases with many dependencies, this can quickly consume token limits and increase processing time.
+</Warning>
+
+**Example token growth:**
+
+```
+Without -r:  1 file  × 200 lines = 200 lines (~2,000 tokens)
+With -r:     8 files × 200 lines = 1,600 lines (~16,000 tokens)
+```
+
+### Processing Time
+
+The graph traversal adds computational overhead:
+
+1. **AST Parsing**: Each file is parsed to extract imports
+2. **File I/O**: Reading multiple files from disk
+3. **Graph Traversal**: BFS through the dependency tree
+4. **LLM Processing**: More tokens = longer inference time
+
+<Accordion title="Performance Optimization Techniques">
+- **Visited Set**: Prevents reprocessing files (`processed_files` set)
+- **Early Exit**: Stops if file not in project boundaries
+- **Lazy Parsing**: Only parses files as they're discovered
+- **Exception Handling**: Continues on syntax errors without crashing
+</Accordion>
+
+### Project Boundaries
+
+Splat automatically filters out:
+- Standard library imports (`json`, `os`, `sys`, etc.)
+- Third-party packages (`requests`, `numpy`, etc.)
+- Files outside the project root
+
+```python
+def is_project_file(file_path: str, project_root: str) -> bool:
+    return os.path.commonpath([file_path, project_root]) == project_root
+```
+
+This keeps context focused and reduces unnecessary token usage (`utils.py:38-39`).
+
+## Real-World Example
+
+<Accordion title="Scenario: API Error with Database Connection">
+**Error:** `AttributeError` in `app.py` when calling `db.connect()`
+
+**Without -r:**
+```
+Analyzed files: [app.py]
+Result: "db object not found" - unclear root cause
+```
+
+**With -r:**
+```
+Analyzed files: [app.py, config.py, database.py, models.py]
+Dependency graph:
+  app.py → config.py → database.py
+  app.py → models.py → database.py
+
+Result: "config.py missing DB_HOST variable, causing database.py 
+         initialization to fail" - clear fix path
+```
+
+The relational context revealed the issue was in `config.py`, not `app.py`.
+</Accordion>
+
+## Limitations
+
+<Note>
+**Current limitations of relational context:**
+
+- Only analyzes Python files (`.py` extension)
+- Does not parse dynamic imports (`importlib`, `__import__`)
+- Assumes imports can be resolved statically
+- Does not follow imports from third-party packages
+- Syntax errors in files may prevent import extraction
+</Note>
+
+## Implementation Reference
+
+Key functions from the source code:
+
+<ResponseField name="build_adjacency_list" type="function">
+  **Location:** `utils.py:130-189`
+  
+  **Parameters:**
+  - `files: List[str]` - Starting files to analyze
+  - `project_root: str` - Root directory of the project
+  
+  **Returns:** `Dict[str, List[str]]` - Adjacency list mapping files to their imports
+</ResponseField>
+
+<ResponseField name="get_nth_related_files" type="function">
+  **Location:** `utils.py:108-122`
+  
+  **Parameters:**
+  - `start_files: List[str]` - Files from error traceback
+  - `graph: Dict[str, List[str]]` - Adjacency list from build_adjacency_list
+  
+  **Returns:** `Set[str]` - All files connected through any degree of imports
+</ResponseField>
+
+<ResponseField name="relational_error_parsing_function" type="function">
+  **Location:** `relational.py:13-30`
+  
+  **Parameters:**
+  - `entrypoint: List[str]` - Command to execute (e.g., `['python3', 'app.py']`)
+  - `flag: str` - Optional `-r` flag for relational context
+  
+  **Returns:** `Tuple[str, str, str]` - (traceback, error_info, repopack_context)
+</ResponseField>

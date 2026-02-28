@@ -1,0 +1,226 @@
+---
+title: 'Commands'
+description: 'Complete reference for all splat CLI commands'
+---
+
+## Overview
+
+Splat provides a simple yet powerful command-line interface for debugging compile and runtime errors with AI assistance. The tool analyzes error tracebacks, gathers contextual information from your codebase, and delivers intelligent debugging suggestions.
+
+## Command Structure
+
+All splat commands follow this general syntax:
+
+```bash
+splat <command> [flags] <entrypoint>
+```
+
+<ParamField path="command" type="string" required>
+  The action to perform (currently: `squash`)
+</ParamField>
+
+<ParamField path="flags" type="string">
+  Optional flags that modify command behavior (e.g., `-r` for relational context)
+</ParamField>
+
+<ParamField path="entrypoint" type="string" required>
+  The command to execute your application (e.g., `"python3 main.py"`)
+</ParamField>
+
+## splat squash
+
+The primary command for debugging errors with AI-powered assistance.
+
+### Syntax
+
+```bash
+splat squash [?-r] <entrypoint>
+```
+
+### Description
+
+The `squash` command executes your application, captures any errors that occur, collects relevant code context, and uses AI (powered by Groq) to provide debugging suggestions. It intelligently parses error tracebacks and gathers file content to deliver highly contextual debugging responses.
+
+### Parameters
+
+<ParamField path="entrypoint" type="string" required>
+  The command to run your application. This should be the exact command you would normally use to start your program.
+  
+  **Examples:**
+  - `"python3 app.py"`
+  - `"python3 main.py"`
+  - `"node server.js"`
+  - `"python manage.py runserver"`
+</ParamField>
+
+<ParamField path="-r" type="flag">
+  Enable relational context gathering. When set, splat will analyze import relationships and collect code from files related to those in the error stack trace, providing deeper context to the AI.
+</ParamField>
+
+### How It Works
+
+1. **Execution**: Runs your application with the provided entrypoint
+2. **Error Capture**: Intercepts and captures error output from stderr
+3. **Stack Trace Parsing**: Extracts file paths and line numbers from the error traceback
+4. **Context Collection**: Gathers relevant source code:
+   - Without `-r`: Only files mentioned in the error stack
+   - With `-r`: Error stack files plus all imported/related files
+5. **AI Analysis**: Sends error information and context to Groq AI for analysis
+6. **Response Delivery**: Returns structured debugging suggestions
+
+### Examples
+
+<Tabs>
+  <Tab title="Basic Usage">
+    Run splat on a Python script without relational context:
+
+    ```bash
+    splat squash "python3 foo.py"
+    ```
+
+    This will:
+    - Execute `python3 foo.py`
+    - Capture any errors
+    - Analyze only the files in the error traceback
+    - Provide debugging suggestions
+  </Tab>
+
+  <Tab title="With Relational Context">
+    Use the `-r` flag for deeper context analysis:
+
+    ```bash
+    splat squash -r "python3 main.py"
+    ```
+
+    This will:
+    - Execute `python3 main.py`
+    - Capture any errors
+    - Build a dependency graph of imported modules
+    - Collect code from all related files
+    - Provide more comprehensive debugging suggestions
+  </Tab>
+
+  <Tab title="FastAPI Application">
+    Debug a FastAPI server:
+
+    ```bash
+    splat squash "python3 main.py"
+    ```
+
+    Splat will detect the framework and handle FastAPI-specific errors appropriately.
+  </Tab>
+
+  <Tab title="Node.js Application">
+    Debug a Node.js application:
+
+    ```bash
+    splat squash "node app.js"
+    ```
+
+    Splat supports multiple programming languages and frameworks.
+  </Tab>
+</Tabs>
+
+### Output Format
+
+The AI response is structured as JSON with the following format:
+
+```json
+{
+  "where": {
+    "repository_path": "/path/to/your/project",
+    "file_name": "main.py",
+    "line_number": "42"
+  },
+  "what": {
+    "error_type": "SyntaxError",
+    "description": "Unclosed parenthesis in print statement"
+  },
+  "how": {
+    "error_origination": "42",
+    "suggested_code_solution": "print(\"hello\")"
+  }
+}
+```
+
+<Info>
+  The `where` section tells you exactly which file and line caused the error, `what` explains the error type and description, and `how` provides a code snippet to fix the issue.
+</Info>
+
+### Supported Languages and Frameworks
+
+Splat automatically detects and supports:
+
+<CodeGroup>
+```python Python
+python3 main.py
+python app.py
+```
+
+```javascript JavaScript
+node server.js
+node index.js
+```
+
+```typescript TypeScript
+node app.ts
+tsx index.ts
+```
+
+```go Go
+go run main.go
+```
+
+```rust Rust
+cargo run
+```
+</CodeGroup>
+
+And frameworks including:
+- **Python**: FastAPI, Django, Flask
+- **JavaScript/TypeScript**: Next.js, React, Express, Vue, Angular
+- **Java**: Spring Boot
+- **Ruby**: Rails
+- **PHP**: Laravel
+- **.NET**: ASP.NET Core
+
+### Exit Behavior
+
+<Note>
+  Splat executes your application and expects it to fail. If your application runs successfully without errors, splat will return empty strings for traceback, error info, and context.
+</Note>
+
+### Git-Aware Context
+
+<Info>
+  Splat respects your `.gitignore` file and will not include ignored files in the context sent to the AI. This prevents sensitive information like API keys, credentials, and other secrets from being exposed.
+</Info>
+
+## Global Installation
+
+Splat is designed to work globally without project-specific configuration:
+
+```bash
+# Install globally
+pip install splat
+
+# Use anywhere
+cd /path/to/any/project
+splat squash "python3 main.py"
+```
+
+## Command Limitations
+
+<Warning>
+  **Known Issues:**
+  
+  1. Splat does not conform to formatting configurations when inserting code fixes
+  2. Sub-module entrypoints that don't originate in the root directory may not work correctly
+  3. The entrypoint must be executable from the current working directory
+</Warning>
+
+## Interactive Mode
+
+<Note>
+  Currently, splat only supports single-shot error analysis. Interactive debugging sessions are not yet available.
+</Note>

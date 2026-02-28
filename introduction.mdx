@@ -1,0 +1,84 @@
+---
+title: Introduction
+description: AI-powered debugging tool that analyzes compile and runtime errors with highly contextual insights
+---
+
+# Welcome to splat
+
+splat is a tool that combines your compile/runtime errors and grabs context from every crevice to deliver a highly educated debug response. This is perfect for whenever you have an error that needs to be quickly fixed, understood, and prevented for later in the future.
+
+```
+ /\_/\
+( o.o )
+ > ^ <
+```
+
+<Info>Created at CalHacks 11.0</Info>
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install splat and set up your environment
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get up and running in minutes
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="AI-Optimized" icon="brain">
+    Uses Groq's extremely fast inference model to produce instant debug responses with high accuracy
+  </Card>
+  <Card title="Simple to Use" icon="wand-magic-sparkles">
+    Works out-of-the-box globally in any project without configuration
+  </Card>
+  <Card title="Git Aware" icon="git">
+    Respects your .gitignore files to avoid using sensitive information
+  </Card>
+  <Card title="Highly Contextual" icon="sitemap">
+    Use the -r flag to grab all nodes to the Nth degree related to error stack files for maximum context
+  </Card>
+</CardGroup>
+
+## How It Works
+
+splat analyzes your errors in three steps:
+
+1. **Error Detection**: Runs your code in a contained environment and captures compilation or runtime errors
+2. **Context Gathering**: Collects relevant code context from error traces (and related files with `-r` flag)
+3. **AI Analysis**: Sends error information and context to Groq's LLM for structured debugging advice
+
+The result is a JSON-formatted response that tells you:
+- **Where** the error occurred (file path and line number)
+- **What** caused the error (error type and description)
+- **How** to fix it (suggested code solution)
+
+## Why splat?
+
+Traditional debugging can be time-consuming, especially when errors span multiple files or require understanding complex dependencies. splat automates the tedious parts:
+
+- No need to manually trace errors through your codebase
+- No need to paste error messages into ChatGPT
+- No risk of exposing sensitive code (respects .gitignore)
+- Get actionable fixes, not just explanations
+
+## Known Limitations
+
+<Warning>
+  - splat will not conform to any formatting configurations when inserting code
+  - splat does not do well with running sub-module entrypoints that do not originate in the root directory
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Install splat" icon="arrow-right" href="/installation">
+    Set up splat in your development environment
+  </Card>
+  <Card title="Try the Quick Start" icon="play" href="/quickstart">
+    Fix your first error with splat
+  </Card>
+</CardGroup>

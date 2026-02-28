@@ -1,0 +1,557 @@
+---
+title: 'AI Integration'
+description: 'How splat uses Groq and LLM prompts to generate structured fix suggestions'
+---
+
+## Overview
+
+Splat's AI integration transforms raw error data into actionable debugging advice using Groq's LLM API. The system sends carefully structured prompts with error context and receives JSON-formatted responses containing precise fix suggestions.
+
+## Groq Integration
+
+Splat uses the Groq API with the `llama3-70b-8192` model for error analysis (`process/process.py`).
+
+```python
+from groq import Groq
+import os
+
+client = Groq(api_key=os.getenv("API"))
+```
+
+<Info>
+The API key is loaded from the `API` environment variable using `python-dotenv`. Ensure your `.env` file contains: `API=your_groq_api_key_here`
+</Info>
+
+### Why Groq?
+
+<CardGroup cols={2}>
+  <Card title="Fast Inference" icon="bolt">
+    Groq's LPU architecture provides near-instant responses, critical for interactive debugging
+  </Card>
+  <Card title="Large Context" icon="window-maximize">
+    8192 token context window accommodates substantial code context
+  </Card>
+  <Card title="Structured Output" icon="brackets-curly">
+    Built-in JSON mode ensures consistent, parseable responses
+  </Card>
+  <Card title="Model Quality" icon="star">
+    Llama 3 70B provides strong code understanding and debugging capabilities
+  </Card>
+</CardGroup>
+
+## LLM Prompt Structure
+
+The `process()` function constructs a multi-part prompt with system instructions and user context (`process/process.py:10-38`).
+
+### System Messages
+
+<Accordion title="Message 1: Role Definition">
+```python
+{
+  "role": "system",
+  "content": "You are an expert software debugging assistant specializing in Python error analysis. Your task is to analyze error tracebacks and provide structured, actionable advice. Follow these steps precisely:"
+}
+```
+
+Establishes the LLM's expertise domain and sets expectations for precise analysis.
+</Accordion>
+
+<Accordion title="Message 2: Analysis Steps">
+```python
+{
+  "role": "system",
+  "content": """1. Analyze the provided error traceback and original error message.
+2. Identify the source of the error within the repository structure.
+3. Explain the error concisely in natural language.
+4. Provide specific, actionable suggestions for resolving the error.
+5. Format your response as a JSON object with the exact structure specified below."""
+}
+```
+
+Defines the step-by-step process the LLM should follow.
+</Accordion>
+
+<Accordion title="Message 3: Response Format">
+```python
+{
+  "role": "system",
+  "content": """Your response MUST be a valid JSON object with this exact structure:
+{
+  "where": {
+    "repository_path": "<absolute path to repository>",
+    "file_name": "<name of file containing error>",
+    "line_number": "<line number where error occurred>"
+  },
+  "what": {
+    "error_type": "<specific Python error type>",
+    "description": "<concise explanation of error>"
+  },
+  "how": {
+    "error_origination": "<line number where error originated>",
+    "suggested_code_solution": "<code snippet to fix the error>"
+  }
+}"""
+}
+```
+
+Specifies the exact JSON schema for structured output.
+</Accordion>
+
+<Accordion title="Message 4: Constraints">
+```python
+{
+  "role": "system",
+  "content": """Constraints:
+- Provide ONLY the JSON object as your response. Do not include any other text.
+- Ensure all JSON keys are exactly as specified.
+- The 'suggested_code_solution' should be a valid Python code snippet without explanation.
+- If multiple errors exist, focus on the most critical one that likely caused the others.
+- Do not use placeholders in your response. Provide specific, contextual information based on the given error.
+- Only fix the line from the line number given that is causing the error."""
+}
+```
+
+Sets strict output requirements and focuses the analysis.
+</Accordion>
+
+### User Message
+
+```python
+{
+  "role": "user",
+  "content": f"Context: {context}\n\nTraceback message: {traceback_message}\n\nOriginal error message: {original_error_information}"
+}
+```
+
+Provides the actual error data:
+- **Context**: Full file contents from repopack
+- **Traceback message**: Complete error stack trace
+- **Original error message**: Raw error information
+
+## API Call Configuration
+
+```python
+chat_completion = client.chat.completions.create(
+    messages=[...],  # All system and user messages
+    model="llama3-70b-8192",
+    response_format={"type": "json_object"}
+)
+```
+
+<ResponseField name="model" type="string" required>
+  `llama3-70b-8192` - Meta's Llama 3 model with 70 billion parameters and 8192 token context
+</ResponseField>
+
+<ResponseField name="response_format" type="object" required>
+  `{"type": "json_object"}` - Forces the LLM to output valid JSON, preventing malformed responses
+</ResponseField>
+
+<ResponseField name="messages" type="array" required>
+  Array of system and user messages constructing the complete prompt
+</ResponseField>
+
+## Response Format
+
+The LLM returns a structured JSON object with three main sections (`process/process.py:24-26`).
+
+### Response Schema
+
+```json
+{
+  "where": {
+    "repository_path": "/absolute/path/to/repository",
+    "file_name": "app.py",
+    "line_number": "15"
+  },
+  "what": {
+    "error_type": "AttributeError",
+    "description": "Attempted to call .upper() method on NoneType object"
+  },
+  "how": {
+    "error_origination": "15",
+    "suggested_code_solution": "if value is not None:\n    return value.upper()\nreturn ''"
+  }
+}
+```
+
+<Tabs>
+  <Tab title="where">
+    **Location Information**
+    
+    Identifies exactly where the error occurred:
+    - `repository_path`: Absolute path to the project root
+    - `file_name`: Name of the file containing the error
+    - `line_number`: Specific line where the error manifested
+    
+    <Note>
+    This information is extracted from the traceback, not guessed.
+    </Note>
+  </Tab>
+  <Tab title="what">
+    **Error Description**
+    
+    Explains the nature of the error:
+    - `error_type`: Python error class (e.g., `TypeError`, `NameError`, `AttributeError`)
+    - `description`: Human-readable explanation of what went wrong
+    
+    <Note>
+    Descriptions are concise (1-2 sentences) focusing on the root cause.
+    </Note>
+  </Tab>
+  <Tab title="how">
+    **Fix Suggestion**
+    
+    Provides actionable solution:
+    - `error_origination`: Line number where the issue started (may differ from where it crashed)
+    - `suggested_code_solution`: Valid Python code snippet to resolve the error
+    
+    <Warning>
+    Code suggestions fix ONLY the problematic line, not the entire file.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## How AI Suggests Fixes
+
+The LLM follows a multi-step reasoning process:
+
+<Steps>
+  <Step title="Parse Traceback">
+    Identify the error type, message, and call stack from the traceback
+  </Step>
+  <Step title="Locate Error">
+    Find the exact file and line number where the error occurred
+  </Step>
+  <Step title="Analyze Context">
+    Review surrounding code from the provided file contents
+  </Step>
+  <Step title="Identify Root Cause">
+    Determine what condition or logic error led to the failure
+  </Step>
+  <Step title="Generate Fix">
+    Create a minimal code change that resolves the root cause
+  </Step>
+  <Step title="Format Response">
+    Structure the analysis into the required JSON format
+  </Step>
+</Steps>
+
+### Reasoning Example
+
+<Accordion title="Trace through an AttributeError fix">
+**Given Error:**
+```python
+Traceback (most recent call last):
+  File "app.py", line 10, in transform
+    return value.upper()
+AttributeError: 'NoneType' object has no attribute 'upper'
+```
+
+**Given Context:**
+```python
+# app.py
+def transform(value):
+    return value.upper()  # Line 10
+
+data = None
+result = transform(data)
+```
+
+**LLM Reasoning:**
+1. Error type is `AttributeError` on line 10
+2. `.upper()` method called on `NoneType` (value is None)
+3. Function `transform` doesn't check if value is None before calling methods
+4. Root cause: Missing None check before string operation
+5. Fix: Add None check with appropriate fallback
+
+**Generated Response:**
+```json
+{
+  "where": {
+    "repository_path": "/home/user/project",
+    "file_name": "app.py",
+    "line_number": "10"
+  },
+  "what": {
+    "error_type": "AttributeError",
+    "description": "Attempted to call .upper() on None value. The value parameter was None, which has no .upper() method."
+  },
+  "how": {
+    "error_origination": "10",
+    "suggested_code_solution": "return value.upper() if value is not None else ''"
+  }
+}
+```
+</Accordion>
+
+## Prompt Engineering Principles
+
+Splat's prompts follow key design principles:
+
+<CardGroup cols={2}>
+  <Card title="Specificity" icon="crosshairs">
+    Explicit instructions like "focus on the most critical error" prevent unfocused analysis
+  </Card>
+  <Card title="Structure" icon="table">
+    Rigid JSON schema ensures consistent, parseable output
+  </Card>
+  <Card title="Constraints" icon="lock">
+    Rules like "no placeholders" force concrete suggestions
+  </Card>
+  <Card title="Role-Playing" icon="user-tie">
+    "Expert debugging assistant" primes for quality code analysis
+  </Card>
+</CardGroup>
+
+### Key Constraints
+
+<Tabs>
+  <Tab title="Output Format">
+    - **ONLY** JSON in response
+    - No explanatory text before/after JSON
+    - Exact key names as specified
+    - Valid JSON syntax required
+  </Tab>
+  <Tab title="Code Quality">
+    - Valid Python syntax
+    - No comments in code suggestions
+    - No placeholder variables
+    - Minimal, targeted fixes
+  </Tab>
+  <Tab title="Analysis Focus">
+    - Single most critical error
+    - Root cause, not symptoms
+    - Specific line numbers
+    - Contextual understanding
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+The integration includes robust error handling:
+
+```python
+try:
+    chat_completion = client.chat.completions.create(...)
+    return chat_completion.choices[0].message.content
+except Exception as e:
+    # Handle API errors, network issues, etc.
+    return {"error": str(e)}
+```
+
+<Warning>
+**Potential issues:**
+- API rate limits
+- Network timeouts
+- Invalid API keys
+- Context length exceeded (>8192 tokens)
+- Malformed JSON responses (rare with `json_object` mode)
+</Warning>
+
+## Token Management
+
+With an 8192 token context window:
+
+### Token Budget Breakdown
+
+```
+System messages:     ~500 tokens
+User error message:  ~100 tokens
+File context:        ~6000 tokens (remaining for code)
+Response:            ~500 tokens
+Buffer:              ~1000 tokens
+```
+
+<Info>
+**Optimization tips:**
+- Use `-r` flag judiciously to avoid large context
+- Typical file: ~200 lines ≈ 2000 tokens
+- With `-r`, limit to ~3-4 related files
+- Error tracebacks are usually less than 100 tokens
+</Info>
+
+## Response Processing
+
+The `process()` function returns the raw JSON string:
+
+```python
+return chat_completion.choices[0].message.content
+```
+
+The CLI then parses this JSON to display structured results to the user.
+
+### Example Flow
+
+```python
+# In module.py
+response_json = process(traceback, error_info, repopack)
+response = json.loads(response_json)
+
+print(f"Error in {response['where']['file_name']}:{response['where']['line_number']}")
+print(f"Type: {response['what']['error_type']}")
+print(f"Fix: {response['how']['suggested_code_solution']}")
+```
+
+## Model Selection: llama3-70b-8192
+
+<Tabs>
+  <Tab title="Why Llama 3 70B?">
+    **Strengths:**
+    - Excellent code understanding
+    - Strong reasoning capabilities
+    - Good at following structured instructions
+    - Reliable JSON generation
+    
+    **Tradeoffs:**
+    - Larger model = slightly slower (but Groq makes it fast)
+    - Higher cost per token than smaller models
+  </Tab>
+  <Tab title="Alternatives Considered">
+    **Smaller Models (8B, 13B):**
+    - Faster, cheaper
+    - Less consistent with complex errors
+    - May miss subtle bugs
+    
+    **Larger Models (GPT-4, Claude):**
+    - More capable
+    - Much slower
+    - Higher cost
+    - Not on Groq's LPU infrastructure
+  </Tab>
+</Tabs>
+
+## Real-World Example
+
+<Accordion title="Complete API interaction for a NameError">
+**Input to `process()`:**
+```python
+traceback = '''
+Traceback (most recent call last):
+  File "app.py", line 5, in <module>
+    print(result)
+NameError: name 'result' is not defined
+'''
+
+error_info = "Command '['python3', 'app.py']' returned non-zero exit status 1"
+
+context = '''
+File: app.py
+Content:
+def calculate():
+    total = 10 + 20
+    return total
+
+print(result)  # Line 5
+'''
+```
+
+**Groq API Request:**
+```json
+{
+  "model": "llama3-70b-8192",
+  "messages": [
+    {"role": "system", "content": "You are an expert software debugging assistant..."},
+    {"role": "system", "content": "1. Analyze the provided error traceback..."},
+    {"role": "system", "content": "Your response MUST be a valid JSON object..."},
+    {"role": "system", "content": "Constraints:\n- Provide ONLY the JSON object..."},
+    {"role": "user", "content": "Context: ...\n\nTraceback message: ...\n\nOriginal error message: ..."}
+  ],
+  "response_format": {"type": "json_object"}
+}
+```
+
+**LLM Response:**
+```json
+{
+  "where": {
+    "repository_path": "/home/user/project",
+    "file_name": "app.py",
+    "line_number": "5"
+  },
+  "what": {
+    "error_type": "NameError",
+    "description": "Variable 'result' is referenced before being defined. The calculate() function returns a value but it's not assigned to any variable."
+  },
+  "how": {
+    "error_origination": "5",
+    "suggested_code_solution": "result = calculate()\nprint(result)"
+  }
+}
+```
+
+**Returned to CLI:**
+```python
+response_object = json.loads(response_json)
+# CLI displays structured fix to user
+```
+</Accordion>
+
+## Implementation Reference
+
+<ResponseField name="process" type="function">
+  **Location:** `process/process.py:10-39`
+  
+  **Purpose:** Send error data to Groq LLM and receive structured fix suggestions
+  
+  **Parameters:**
+  - `traceback_message: str` - Complete error traceback
+  - `original_error_information: str` - Raw error object string
+  - `context: str` - File contents from repopack
+  
+  **Returns:** `str` - JSON string with structured response
+  
+  **Process:**
+  1. Initialize Groq client with API key
+  2. Construct multi-part prompt with system instructions
+  3. Add user message with error data and context
+  4. Call Groq API with llama3-70b-8192 model
+  5. Force JSON output format
+  6. Return response content as string
+</ResponseField>
+
+<ResponseField name="Groq Client" type="object">
+  **Initialization:**
+  ```python
+  client = Groq(api_key=os.getenv("API"))
+  ```
+  
+  **Configuration:**
+  - API key from environment variable `API`
+  - Loaded via `python-dotenv`
+  - No additional client configuration needed
+</ResponseField>
+
+<ResponseField name="chat.completions.create" type="method">
+  **Parameters:**
+  - `messages`: List of system and user message dicts
+  - `model`: `"llama3-70b-8192"`
+  - `response_format`: `{"type": "json_object"}`
+  
+  **Returns:** ChatCompletion object with:
+  - `choices[0].message.content`: The JSON response string
+  - `usage`: Token usage statistics
+  - `id`: Unique completion ID
+</ResponseField>
+
+## Best Practices
+
+<Tabs>
+  <Tab title="Prompt Design">
+    - Use multi-message structure for clarity
+    - Separate role, process, format, and constraints
+    - Provide examples in constraints when needed
+    - Be explicit about what NOT to do
+  </Tab>
+  <Tab title="Context Management">
+    - Include only relevant file contents
+    - Respect token limits (8192 total)
+    - Use `-r` flag strategically
+    - Filter out standard library code
+  </Tab>
+  <Tab title="Response Handling">
+    - Always parse JSON with error handling
+    - Validate schema before displaying
+    - Provide fallbacks for malformed responses
+    - Log API errors for debugging
+  </Tab>
+</Tabs>

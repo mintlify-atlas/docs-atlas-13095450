@@ -1,0 +1,692 @@
+---
+title: Frequently Asked Questions
+description: Common questions about using splat
+---
+
+## Frequently Asked Questions
+
+Answers to common questions about splat's usage, capabilities, and configuration.
+
+---
+
+<Accordion title="How does the -r flag work?">
+
+## The Recursive Context Flag
+
+The `-r` flag enables **recursive dependency resolution** to gather comprehensive context for the AI.
+
+### Without -r (Default Behavior)
+
+```bash
+splat squash "python3 main.py"
+```
+
+- Only includes files mentioned in the error stack trace
+- Faster analysis
+- Less context sent to AI
+- Good for simple, isolated errors
+
+### With -r (Recursive Mode)
+
+```bash
+splat squash -r "python3 main.py"
+```
+
+- Builds a complete dependency graph starting from error files
+- Recursively includes all imported files
+- Traverses imports to the Nth degree
+- More context = more accurate AI responses
+- Slower due to file analysis
+
+### How It Works Internally
+
+1. **Parse error stack** to find initial files (see `~/workspace/source/utils/utils.py:47-74`)
+2. **Build adjacency list** of all file dependencies (see `~/workspace/source/utils/utils.py:130-189`)
+3. **Traverse the graph** using BFS to find all related files (see `~/workspace/source/utils/utils.py:108-122`)
+4. **Collect file contents** and send to AI with error context
+
+### When to Use -r
+
+**Use `-r` when:**
+- Error spans multiple files
+- You have import-related issues
+- The bug requires understanding relationships between modules
+- Error is in a complex, interconnected codebase
+
+**Skip `-r` when:**
+- Simple syntax errors in a single file
+- You want faster results
+- Working with a very large codebase
+- The error is clearly isolated
+
+<Tip>
+Start without `-r` for speed. If the suggestion isn't helpful, retry with `-r` for more context.
+</Tip>
+
+</Accordion>
+
+---
+
+<Accordion title="What languages and frameworks are supported?">
+
+## Language and Framework Support
+
+### Fully Supported
+
+**Python** is the only fully supported language for:
+- Error stack parsing
+- Dependency graph building
+- Import resolution
+- Context gathering
+
+### Detected But Not Fully Supported
+
+The framework detection system (see `~/workspace/source/utils/utils.py:197-399`) can identify:
+
+**Languages:**
+- Go, Rust, Kotlin, Scala, Swift
+- JavaScript, TypeScript, Node.js
+- Java, C/C++
+- Ruby, PHP, R, Perl, Lua, Julia, Haskell
+
+**Frameworks:**
+- **Python:** Django, Flask, FastAPI
+- **JavaScript/TypeScript:** Next.js, React, Vue, Angular, Express
+- **Java:** Spring Boot
+- **Ruby:** Ruby on Rails
+- **PHP:** Laravel
+- **.NET:** ASP.NET Core
+
+**Detection Methods:**
+1. Command patterns (e.g., `go run`, `cargo run`, `npm start`)
+2. Characteristic files (e.g., `go.mod`, `Cargo.toml`, `package.json`)
+3. File extensions (e.g., `.go`, `.rs`, `.ts`)
+
+### Current Limitations
+
+<Warning>
+Detection does NOT mean full support. These languages are recognized but not fully integrated with error parsing and context gathering.
+</Warning>
+
+### Future Support
+
+Support for additional languages is planned. The infrastructure exists but needs:
+- Language-specific error parsers
+- Import/dependency resolution for each language
+- Testing across different frameworks
+
+</Accordion>
+
+---
+
+<Accordion title="Why is context gathering slow?">
+
+## Performance Considerations
+
+### What Causes Slowness
+
+1. **Recursive Import Resolution (-r flag):**
+   - Traverses entire dependency graph
+   - Opens and parses each file with Python's AST
+   - Can touch hundreds of files in large projects
+   - See `~/workspace/source/utils/utils.py:130-189`
+
+2. **File I/O Operations:**
+   - Reading file contents for context
+   - Checking file existence for each import
+   - Multiple disk operations per file
+
+3. **AST Parsing:**
+   - Each Python file is parsed to extract imports
+   - Parsing large files takes time
+   - Syntax errors require exception handling
+
+4. **Project Size:**
+   - More files = more time
+   - Deep import trees increase traversal time
+
+### How to Speed It Up
+
+<Accordion title="1. Use without -r flag">
+
+```bash
+# Faster - only error stack files
+splat squash "python3 main.py"
+
+# Slower - all related files
+splat squash -r "python3 main.py"
+```
+
+This is the single biggest performance improvement.
+
+</Accordion>
+
+<Accordion title="2. Optimize .gitignore">
+
+Ensure your `.gitignore` excludes:
+
+```gitignore
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Dependencies
+node_modules/
+
+# Cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+```
+
+splat respects `.gitignore` (see README feature list), so excluded files won't be processed.
+
+</Accordion>
+
+<Accordion title="3. Reduce import complexity">
+
+- Avoid circular dependencies
+- Use lazy imports where appropriate
+- Keep import trees shallow
+- Consider breaking up large modules
+
+</Accordion>
+
+<Accordion title="4. Run from SSD, not HDD">
+
+File I/O is a major factor. SSDs provide significantly faster read times.
+
+</Accordion>
+
+### Benchmarks
+
+Typical performance on a modern machine:
+
+- **Without -r:** 1-3 seconds (just error files)
+- **With -r (small project):** 3-10 seconds (10-50 files)
+- **With -r (large project):** 10-60+ seconds (100+ files)
+
+<Info>
+The AI inference itself is very fast thanks to Groq's optimized infrastructure. Most time is spent gathering context, not waiting for the AI.
+</Info>
+
+</Accordion>
+
+---
+
+<Accordion title="How do I configure the AI model?">
+
+## AI Model Configuration
+
+### Current Model
+
+splat uses **Groq** with the **llama3-70b-8192** model for extremely fast inference.
+
+See: `~/workspace/source/process/process.py:36`
+
+### Required Configuration
+
+**API Key (Required):**
+
+1. Get your API key from [Groq Console](https://console.groq.com/)
+2. Create `.env` file in your project root:
+   ```bash
+   API=your_groq_api_key_here
+   ```
+
+The API key is loaded via `load_dotenv()` (see `~/workspace/source/process/process.py:8-11`)
+
+### Model Characteristics
+
+**llama3-70b-8192:**
+- 70 billion parameters
+- 8,192 token context window
+- Optimized for code understanding
+- Fast inference via Groq's LPU architecture
+
+### Changing the Model
+
+Currently, the model is hardcoded in the source. To change it:
+
+1. Edit `~/workspace/source/process/process.py`
+2. Modify line 36:
+   ```python
+   model="llama3-70b-8192",  # Change this
+   ```
+
+**Available Groq models:**
+- `llama3-8b-8192` (faster, less capable)
+- `llama3-70b-8192` (balanced - current default)
+- `mixtral-8x7b-32768` (larger context window)
+- Check Groq docs for latest models
+
+### Response Format
+
+The AI returns structured JSON with:
+
+```json
+{
+  "where": {
+    "repository_path": "<path to repo>",
+    "file_name": "<file with error>",
+    "line_number": "<error line>"
+  },
+  "what": {
+    "error_type": "<error type>",
+    "description": "<explanation>"
+  },
+  "how": {
+    "error_origination": "<originating line>",
+    "suggested_code_solution": "<fix code>"
+  }
+}
+```
+
+See: `~/workspace/source/process/process.py:24-26`
+
+<Note>
+Future versions may add a `--model` CLI flag for easier configuration.
+</Note>
+
+</Accordion>
+
+---
+
+<Accordion title="Does it work on Windows?">
+
+## Windows Support Status
+
+### Short Answer
+
+**No, Windows is not directly supported.** You'll see:
+
+```python
+NotImplementedError: Windows not yet supported
+```
+
+See: `~/workspace/source/cli/term_sesh.py:64-65`
+
+### Why Not?
+
+The terminal session functionality uses platform-specific terminal emulators:
+
+- **macOS:** Terminal.app via AppleScript
+- **Linux:** gnome-terminal
+- **Windows:** Not implemented
+
+See: `~/workspace/source/cli/term_sesh.py:46-74`
+
+### Workarounds
+
+<Accordion title="1. Windows Subsystem for Linux (WSL) - Recommended">
+
+**Best option for Windows users:**
+
+1. Install WSL2:
+   ```powershell
+   wsl --install
+   ```
+
+2. Install Ubuntu (or your preferred distro)
+
+3. Install dependencies in WSL:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install python3 python3-pip tmux gnome-terminal
+   ```
+
+4. Run splat from within WSL:
+   ```bash
+   cd /mnt/c/Users/YourName/your-project
+   splat squash "python3 main.py"
+   ```
+
+<Tip>
+WSL2 provides near-native Linux performance and full compatibility.
+</Tip>
+
+</Accordion>
+
+<Accordion title="2. Docker Container">
+
+Run splat in a Linux container:
+
+```bash
+# Create Dockerfile
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    tmux \
+    gnome-terminal
+
+# Build and run
+docker build -t splat-env .
+docker run -it -v ${PWD}:/workspace splat-env
+cd /workspace
+splat squash "python3 main.py"
+```
+
+</Accordion>
+
+<Accordion title="3. Virtual Machine">
+
+Use VirtualBox or VMware to run Linux:
+1. Install Ubuntu in VM
+2. Mount your Windows project folder
+3. Run splat from within the VM
+
+</Accordion>
+
+### Will Windows Be Supported?
+
+Potentially in future releases. Implementation would require:
+- Windows terminal emulator support (cmd.exe, PowerShell, Windows Terminal)
+- Alternative to tmux (ConEmu, or native Windows console API)
+- Testing across Windows versions
+
+<Info>
+Contributions for Windows support are welcome! Check the GitHub repository if you'd like to help.
+</Info>
+
+</Accordion>
+
+---
+
+<Accordion title="How to handle large projects?">
+
+## Working with Large Codebases
+
+### Challenges
+
+1. **Slow context gathering** with `-r` flag
+2. **Token limits** - AI models have context window limits
+3. **Too much noise** - irrelevant files in context
+4. **Memory usage** - loading many files
+
+### Best Practices
+
+<Accordion title="1. Don't use -r by default">
+
+```bash
+# Start here - fast and often sufficient
+splat squash "python3 main.py"
+
+# Only if needed
+splat squash -r "python3 main.py"
+```
+
+In large projects, `-r` can pull in hundreds of files. The error stack alone often provides enough context.
+
+</Accordion>
+
+<Accordion title="2. Maintain a good .gitignore">
+
+splat respects `.gitignore`, so exclude:
+
+```gitignore
+# Dependencies
+venv/
+node_modules/
+
+# Build artifacts
+build/
+dist/
+target/
+*.egg-info/
+
+# Generated files
+*.pyc
+__pycache__/
+
+# Data
+data/
+*.csv
+*.db
+
+# Documentation
+docs/_build/
+
+# Tests (if not needed for debugging)
+tests/
+```
+
+This dramatically reduces the search space.
+
+</Accordion>
+
+<Accordion title="3. Organize code into clear modules">
+
+Better project structure = better context:
+
+```
+project/
+├── src/
+│   ├── core/          # Core business logic
+│   ├── api/           # API endpoints
+│   └── utils/         # Utilities
+├── tests/
+└── scripts/
+```
+
+Errors in `api/` won't pull in unrelated `utils/` code unless necessary.
+
+</Accordion>
+
+<Accordion title="4. Break up monolithic files">
+
+Instead of:
+```
+app.py (5000 lines)
+```
+
+Use:
+```
+app/
+├── __init__.py
+├── routes.py
+├── models.py
+├── services.py
+└── utils.py
+```
+
+Smaller files = faster parsing and more focused context.
+
+</Accordion>
+
+<Accordion title="5. Use targeted debugging">
+
+If you know the error is in a specific subsystem:
+
+```bash
+# Run the specific component
+splat squash "python3 src/api/main.py"
+
+# Instead of
+splat squash "python3 main.py"  # Full application
+```
+
+</Accordion>
+
+<Accordion title="6. Consider context window limits">
+
+The current model (llama3-70b-8192) has an **8,192 token limit**.
+
+Rough estimates:
+- 1 token ≈ 4 characters
+- 8,192 tokens ≈ 32KB of text
+- About 500-1000 lines of code with error context
+
+If you hit limits:
+- Reduce use of `-r`
+- Improve `.gitignore`
+- Fix errors in smaller components
+
+</Accordion>
+
+### Monitoring Performance
+
+Watch for these signs:
+
+- Context gathering takes >30 seconds
+- AI responses become generic/less specific
+- Errors about token limits
+
+These indicate too much context is being gathered.
+
+<Warning>
+If the dependency graph becomes too large, splat may spend more time gathering context than you'd spend debugging manually. Use `-r` judiciously.
+</Warning>
+
+</Accordion>
+
+---
+
+<Accordion title="Can I use my own API key from another provider?">
+
+## Custom AI Providers
+
+### Current Implementation
+
+splat is hardcoded to use **Groq** as the AI provider.
+
+See: `~/workspace/source/process/process.py:2,11`
+
+```python
+from groq import Groq
+# ...
+client = Groq(api_key=os.getenv("API"))
+```
+
+### Using Another Provider
+
+To use OpenAI, Anthropic, or another provider, you'd need to modify the source:
+
+1. **Install the provider's SDK:**
+   ```bash
+   pip install openai  # or anthropic, etc.
+   ```
+
+2. **Edit `process/process.py`:**
+   ```python
+   # Replace
+   from groq import Groq
+   client = Groq(api_key=os.getenv("API"))
+   
+   # With (for OpenAI example)
+   from openai import OpenAI
+   client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+   ```
+
+3. **Update the API call:**
+   ```python
+   chat_completion = client.chat.completions.create(
+       messages=[...],
+       model="gpt-4",  # or your preferred model
+       response_format={"type": "json_object"}
+   )
+   ```
+
+### Why Groq?
+
+Groq was chosen for:
+- **Speed:** Ultra-fast inference on LPU hardware
+- **Cost:** Competitive pricing
+- **Quality:** llama3-70b provides excellent code understanding
+
+<Info>
+Future versions may add a `--provider` flag to switch between AI providers without code changes.
+</Info>
+
+</Accordion>
+
+---
+
+<Accordion title="What information does splat send to the AI?">
+
+## Privacy and Data Sharing
+
+### What Gets Sent
+
+When you run splat, the following is sent to Groq's API:
+
+1. **Error traceback:** The full error message and stack trace
+2. **Original error information:** Command output and error details
+3. **Context files:** Contents of relevant source files
+   - Without `-r`: Only files in error stack
+   - With `-r`: All related files in dependency graph
+4. **System prompts:** Instructions for the AI
+
+See: `~/workspace/source/process/process.py:14-34`
+
+### What Does NOT Get Sent
+
+- Files excluded by `.gitignore` (splat is git-aware)
+- Files outside your project directory
+- Environment variables (except what's in error output)
+- Your API keys (stored locally in `.env`)
+- Binary files or images
+
+### Privacy Considerations
+
+<Warning>
+**Do not run splat on:**
+- Proprietary code you cannot share
+- Projects with sensitive business logic
+- Code with embedded secrets, passwords, or keys
+- Confidential client projects without permission
+</Warning>
+
+### Best Practices
+
+1. **Review your `.gitignore`:**
+   ```gitignore
+   .env
+   secrets.json
+   credentials/
+   *.key
+   *.pem
+   ```
+
+2. **Check error output before running splat:**
+   If your error contains sensitive data, don't use splat.
+
+3. **For sensitive projects:**
+   - Use a local AI model instead
+   - Review the code to be sent before running
+   - Consider self-hosting Groq-compatible models
+
+### Data Retention
+
+Refer to [Groq's Privacy Policy](https://groq.com/privacy-policy/) for information about:
+- How long data is stored
+- Whether it's used for model training
+- Data deletion policies
+
+<Tip>
+For maximum privacy, consider forking splat and integrating a local LLM like Ollama or LM Studio.
+</Tip>
+
+</Accordion>
+
+---
+
+## More Questions?
+
+If your question isn't answered here:
+
+1. Check the [Common Issues](/troubleshooting/common-issues) page
+2. Review the [Known Bugs](/troubleshooting/known-bugs) page
+3. Read the source code - it's well-commented!
+4. Ask on GitHub Discussions
+5. Open an issue if you think something is broken

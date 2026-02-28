@@ -1,0 +1,205 @@
+---
+title: API Keys Setup
+description: Configure API keys for Groq AI to enable splat's debugging capabilities
+---
+
+## Overview
+
+Splat uses the Groq API to provide fast, AI-powered debugging assistance. You'll need to obtain a Groq API key to use splat's core features.
+
+## Groq API Key
+
+### Getting Your API Key
+
+<Steps>
+  <Step title="Create a Groq Account">
+    Visit [Groq Console](https://console.groq.com) and sign up for an account if you don't already have one.
+  </Step>
+
+  <Step title="Generate an API Key">
+    1. Log in to your Groq Console
+    2. Navigate to the API Keys section
+    3. Click "Create API Key"
+    4. Copy your new API key immediately (you won't be able to see it again)
+  </Step>
+
+  <Step title="Store Your API Key Securely">
+    Keep your API key in a secure location. You'll need it for the next step.
+
+    <Warning>
+      Never share your API key publicly or commit it to version control. Treat it like a password.
+    </Warning>
+  </Step>
+</Steps>
+
+### Configuring the API Key
+
+Splat looks for API credentials in environment variables. There are two methods to configure your API key:
+
+#### Method 1: Using a .env File (Recommended)
+
+Create a `.env` file in your project root directory:
+
+```bash
+# Required for process.py
+API=gsk_your_actual_groq_api_key_here
+
+# Optional: For agents.py (alternative configuration)
+API_KEY=gsk_your_actual_groq_api_key_here
+MODEL=groq/llama3-70b-8192
+```
+
+<Note>
+  Splat uses `python-dotenv` to automatically load variables from `.env` files. The environment variables are loaded at runtime in both `process/process.py` and `agents/agents.py`.
+</Note>
+
+#### Method 2: Export Environment Variables
+
+Alternatively, you can export the environment variables directly in your shell:
+
+**Linux/macOS:**
+```bash
+export API="gsk_your_actual_groq_api_key_here"
+export API_KEY="gsk_your_actual_groq_api_key_here"
+export MODEL="groq/llama3-70b-8192"
+```
+
+**Windows (PowerShell):**
+```powershell
+$env:API="gsk_your_actual_groq_api_key_here"
+$env:API_KEY="gsk_your_actual_groq_api_key_here"
+$env:MODEL="groq/llama3-70b-8192"
+```
+
+**Windows (Command Prompt):**
+```cmd
+set API=gsk_your_actual_groq_api_key_here
+set API_KEY=gsk_your_actual_groq_api_key_here
+set MODEL=groq/llama3-70b-8192
+```
+
+## Environment Variables Reference
+
+| Variable | Required | Used In | Description |
+|----------|----------|---------|-------------|
+| `API` | Yes | `process/process.py:11` | Groq API key for the main debugging process |
+| `API_KEY` | Optional | `agents/agents.py:38` | Groq API key for the AI agent system |
+| `MODEL` | Optional | `agents/agents.py:37` | Model identifier for the AI agent (e.g., `groq/llama3-70b-8192`) |
+
+## Model Configuration
+
+### Default Model
+
+Splat uses the `llama3-70b-8192` model by default for debugging operations. This model is specified in `process/process.py:36`:
+
+```python
+model="llama3-70b-8192"
+```
+
+### Custom Model Selection
+
+For the agent system, you can specify a different model using the `MODEL` environment variable:
+
+```bash
+# In your .env file
+MODEL=groq/llama3-70b-8192
+```
+
+Available Groq models include:
+- `llama3-70b-8192` - High accuracy, best for complex debugging
+- `llama3-8b-8192` - Faster inference, good for simpler tasks
+- `mixtral-8x7b-32768` - Alternative model with larger context window
+
+<Note>
+  Check the [Groq documentation](https://console.groq.com/docs/models) for the most up-to-date list of available models and their capabilities.
+</Note>
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines to protect your API keys:
+</Warning>
+
+### 1. Never Commit API Keys to Git
+
+Add `.env` to your `.gitignore` file:
+
+```bash
+# .gitignore
+.env
+.env.local
+*.env
+```
+
+### 2. Use Different Keys for Different Environments
+
+Maintain separate API keys for:
+- Development
+- Testing
+- Production (if applicable)
+
+### 3. Rotate Keys Regularly
+
+Periodically generate new API keys and revoke old ones in the Groq Console.
+
+### 4. Limit Key Permissions
+
+If Groq offers different permission levels, use the minimum permissions necessary for your use case.
+
+### 5. Monitor API Usage
+
+Regularly check your Groq Console for:
+- Unexpected usage spikes
+- Unauthorized access attempts
+- API rate limit warnings
+
+## Troubleshooting
+
+### "API key not found" Error
+
+If you see an error about missing API keys:
+
+1. Verify your `.env` file exists in the project root
+2. Ensure the variable name is exactly `API` (case-sensitive)
+3. Check that there are no quotes around the key in the `.env` file (or use quotes consistently)
+4. Restart your terminal/IDE to reload environment variables
+
+### Authentication Errors
+
+If you receive authentication errors:
+
+1. Verify your API key is valid in the Groq Console
+2. Ensure the key hasn't been revoked or expired
+3. Check that you're copying the entire key without extra spaces
+4. Confirm your Groq account is in good standing
+
+### Rate Limiting
+
+If you hit rate limits:
+
+1. Check your usage in the Groq Console
+2. Consider upgrading your Groq plan if needed
+3. Implement retry logic with exponential backoff
+4. Cache results when possible to reduce API calls
+
+## Verifying Configuration
+
+To verify your API key is configured correctly, you can test it with a simple Python script:
+
+```python
+import os
+from dotenv import load_dotenv
+from groq import Groq
+
+load_dotenv()
+
+api_key = os.getenv("API")
+if api_key:
+    print("✓ API key found")
+    client = Groq(api_key=api_key)
+    print("✓ Groq client initialized successfully")
+else:
+    print("✗ API key not found. Check your .env file.")
+```
+
+Run this script in your project directory to confirm the configuration is working.

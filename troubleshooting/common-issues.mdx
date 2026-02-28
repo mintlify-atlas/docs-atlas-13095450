@@ -1,0 +1,322 @@
+---
+title: Common Issues
+description: Solutions to frequently encountered problems when using splat
+---
+
+## Common Issues and Solutions
+
+This page covers the most common issues you may encounter when using splat and how to resolve them.
+
+<Accordion title="API Key Not Set">
+
+### Problem
+You see an error like:
+```
+groq.APIError: API key not found
+```
+
+### Cause
+The splat tool requires a Groq API key to communicate with the AI model, but it's not configured in your environment.
+
+See: `~/workspace/source/process/process.py:11`
+
+### Solution
+1. Get your API key from [Groq Console](https://console.groq.com/)
+2. Create a `.env` file in your project root:
+```bash
+touch .env
+```
+3. Add your API key:
+```bash
+API=your_groq_api_key_here
+```
+
+<Note>
+The `.env` file should be in the directory where you run the `splat` command, as splat uses `load_dotenv()` to read environment variables.
+</Note>
+
+</Accordion>
+
+<Accordion title="Terminal/tmux Not Found or Session Errors">
+
+### Problem
+You see errors related to tmux or terminal sessions:
+```
+Error creating tmux session: [Errno 2] No such file or directory: 'tmux'
+```
+
+### Cause
+splat uses tmux for terminal session management (see `~/workspace/source/cli/term_sesh.py:50`), but tmux is not installed or not in your PATH.
+
+### Solution
+
+**On macOS:**
+```bash
+brew install tmux
+```
+
+**On Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install tmux
+```
+
+**On Fedora/RHEL:**
+```bash
+sudo dnf install tmux
+```
+
+After installation, verify tmux is working:
+```bash
+tmux -V
+```
+
+</Accordion>
+
+<Accordion title="File Not Found Errors">
+
+### Problem
+You see errors like:
+```
+FileNotFoundError: [Errno 2] No such file or directory: 'your_file.py'
+```
+
+### Cause
+1. The file path in the error stack doesn't exist
+2. You're running splat from the wrong directory
+3. The error parsing couldn't find the correct file path
+
+See: `~/workspace/source/utils/utils.py:71` - Only files that exist are included in the analysis
+
+### Solution
+
+1. **Verify your working directory:**
+```bash
+pwd
+```
+Make sure you're in the project root where your entrypoint file exists.
+
+2. **Use absolute paths in your command:**
+```bash
+splat squash "python3 /absolute/path/to/your/script.py"
+```
+
+3. **Check file permissions:**
+```bash
+ls -la your_file.py
+```
+
+</Accordion>
+
+<Accordion title="Permission Denied Errors">
+
+### Problem
+```
+PermissionError: [Errno 13] Permission denied
+```
+
+### Cause
+The file or directory splat is trying to access doesn't have appropriate read/write permissions.
+
+### Solution
+
+1. **Check file permissions:**
+```bash
+ls -la /path/to/file
+```
+
+2. **Make the file readable:**
+```bash
+chmod +r /path/to/file
+```
+
+3. **For entire directory:**
+```bash
+chmod -R +r /path/to/directory
+```
+
+<Warning>
+Be careful with permission changes. Only modify permissions for files you own and understand the security implications.
+</Warning>
+
+</Accordion>
+
+<Accordion title="Platform-Specific Issues: Windows Not Supported">
+
+### Problem
+```
+NotImplementedError: Windows not yet supported
+```
+
+### Cause
+The terminal session functionality in splat uses platform-specific terminal emulators. Currently, only macOS (Terminal) and Linux (gnome-terminal) are supported.
+
+See: `~/workspace/source/cli/term_sesh.py:64-65`
+
+### Workarounds
+
+1. **Use WSL (Windows Subsystem for Linux):**
+   - Install WSL2
+   - Run splat from within your WSL environment
+   - Make sure tmux and gnome-terminal are installed in WSL
+
+2. **Use a Linux virtual machine**
+
+3. **Docker container:**
+```bash
+docker run -it --rm -v $(pwd):/workspace ubuntu:latest
+apt-get update && apt-get install -y python3 tmux
+# Run splat from within the container
+```
+
+<Info>
+Full Windows support may be added in future versions. Track the issue on GitHub.
+</Info>
+
+</Accordion>
+
+<Accordion title="Import Resolution Issues with -r Flag">
+
+### Problem
+When using the `-r` flag, some imports are not resolved correctly:
+```
+Warning: Imported module X does not exist in the same directory or project root.
+```
+
+### Cause
+The dependency graph builder uses simple path resolution for imports and may not handle complex import scenarios like:
+- Packages installed in virtual environments
+- Relative imports with multiple dots (`from ...module import X`)
+- Dynamic imports
+
+See: `~/workspace/source/utils/utils.py:162-180` - Import resolution logic
+
+### Solution
+
+1. **Ensure you're in the project root:**
+```bash
+cd /path/to/project/root
+splat squash -r "python3 main.py"
+```
+
+2. **Use absolute imports in your code when possible:**
+```python
+# Instead of:
+from ..utils import helper
+
+# Use:
+from myproject.utils import helper
+```
+
+3. **Check your PYTHONPATH:**
+```bash
+export PYTHONPATH="${PYTHONPATH}:/path/to/your/project"
+```
+
+<Tip>
+The `-r` flag works best with standard project structures where all imports are resolvable from the project root.
+</Tip>
+
+</Accordion>
+
+<Accordion title="Syntax Errors Preventing File Analysis">
+
+### Problem
+Files with syntax errors are not properly analyzed when building the dependency graph.
+
+### Cause
+When splat tries to parse a file with syntax errors using Python's AST parser, it fails and skips import detection for that file.
+
+See: `~/workspace/source/utils/utils.py:145-153` - AST parsing with exception handling
+
+### Solution
+
+This is actually expected behavior - if you're debugging a syntax error:
+
+1. **Run without the `-r` flag first:**
+```bash
+splat squash "python3 broken_file.py"
+```
+This will still capture the error from the stack trace without needing to parse imports.
+
+2. **Fix syntax errors before using `-r`:**
+The `-r` flag is most useful for runtime errors, not syntax errors.
+
+3. **Check the error output:**
+Even if import detection fails, the file will still be included with a note about unresolved imports.
+
+</Accordion>
+
+<Accordion title="Context Gathering Is Slow">
+
+### Problem
+When using the `-r` flag, splat takes a long time to gather context.
+
+### Cause
+The recursive import resolution traverses the entire dependency graph, which can be large in complex projects.
+
+See: `~/workspace/source/utils/utils.py:108-122` - BFS traversal of dependency graph
+
+### Solutions
+
+1. **Use without `-r` for quick debugging:**
+```bash
+splat squash "python3 main.py"
+```
+This only includes files from the error stack trace.
+
+2. **Optimize your import structure:**
+- Avoid circular dependencies
+- Use lazy imports where appropriate
+- Keep import trees shallow
+
+3. **Use `.gitignore` effectively:**
+splat respects `.gitignore`, so ensure large directories (like `node_modules`, `venv`, etc.) are excluded.
+
+<Note>
+The tradeoff: more context (`-r`) = slower but more accurate responses; less context (no flag) = faster but may miss related code.
+</Note>
+
+</Accordion>
+
+<Accordion title="Error Stack Parsing Fails">
+
+### Problem
+The error stack trace isn't being parsed correctly, or files aren't being detected.
+
+### Cause
+The regex pattern used to extract file paths may not match all error formats.
+
+See: `~/workspace/source/utils/utils.py:59` - File path regex pattern
+
+### Current Pattern
+The parser looks for:
+- `File "path/to/file.py"` (standard Python format)
+- `something.py` (bare .py files)
+
+### Solution
+
+1. **Check your error format:**
+Make sure your error output follows standard Python traceback format:
+```
+Traceback (most recent call last):
+  File "script.py", line 10, in <module>
+    ...
+```
+
+2. **For non-standard errors:**
+You may need to manually specify files or adjust the source code pattern.
+
+3. **Verify files exist:**
+The parser only includes files that exist on disk (see `utils.py:71`), so ensure paths in errors are correct.
+
+</Accordion>
+
+## Still Having Issues?
+
+If your problem isn't covered here:
+
+1. Check the [Known Bugs](/troubleshooting/known-bugs) page
+2. Review the [FAQ](/troubleshooting/faq)
+3. Report issues on GitHub
+4. Ensure you're using the latest version of splat

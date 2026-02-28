@@ -1,0 +1,173 @@
+---
+title: Installation
+description: Install splat and configure your environment for AI-powered debugging
+---
+
+# Installation
+
+Get splat up and running on your system in just a few steps.
+
+## Prerequisites
+
+Before installing splat, ensure you have the following:
+
+- **Python 3.7+** installed on your system
+- **pip** package manager
+- **Git** (for cloning the repository)
+- **Groq API key** (free tier available at [groq.com](https://groq.com/))
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the splat repository from GitHub:
+    
+    ```bash
+    git clone <repository-url>
+    cd splat
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    splat requires several Python packages. Install them using pip:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    This will install the following dependencies:
+    - `click` - CLI framework
+    - `groq` - Groq AI API client
+    - `python-dotenv` - Environment variable management
+    - `repopack` - Repository context packing
+    - `setuptools` - Package installation tools
+    - And other supporting libraries
+  </Step>
+
+  <Step title="Install splat globally">
+    Install splat as a global command-line tool:
+    
+    ```bash
+    pip install -e .
+    ```
+    
+    This uses the `setup.py` configuration to create a `splat` command available system-wide.
+  </Step>
+
+  <Step title="Configure your API key">
+    Create a `.env` file in your project root (or in the splat installation directory):
+    
+    ```bash .env
+    API=your_groq_api_key_here
+    ```
+    
+    <Warning>
+      Never commit your `.env` file to version control. The splat `.gitignore` already excludes it.
+    </Warning>
+    
+    To get a Groq API key:
+    1. Visit [console.groq.com](https://console.groq.com/)
+    2. Sign up for a free account
+    3. Navigate to API Keys
+    4. Create a new API key and copy it to your `.env` file
+  </Step>
+
+  <Step title="Verify installation">
+    Test that splat is installed correctly:
+    
+    ```bash
+    splat --help
+    ```
+    
+    You should see output similar to:
+    
+    ```
+    Usage: splat [OPTIONS] COMMAND [ARGS]...
+    
+    Zap CLI - An interactive command line tool
+    
+    Options:
+      --help  Show this message and exit.
+    
+    Commands:
+      version  Show the version
+    ```
+  </Step>
+</Steps>
+
+## Alternative: Virtual Environment (Recommended)
+
+For isolation and better dependency management, use a virtual environment:
+
+<Steps>
+  <Step title="Create virtual environment">
+    ```bash
+    python3 -m venv splatenv
+    ```
+  </Step>
+
+  <Step title="Activate the environment">
+    <CodeGroup>
+    ```bash macOS/Linux
+    source splatenv/bin/activate
+    ```
+    
+    ```bash Windows
+    splatenv\Scripts\activate
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    pip install -e .
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Command 'splat' not found">
+    If the `splat` command is not recognized after installation:
+    
+    1. Ensure you ran `pip install -e .` from the splat directory
+    2. Check that your Python scripts directory is in your PATH
+    3. Try running with `python -m splat` instead
+    4. Reinstall with `pip uninstall splat && pip install -e .`
+  </Accordion>
+
+  <Accordion title="Import errors or missing dependencies">
+    If you encounter import errors:
+    
+    1. Verify all dependencies are installed: `pip list`
+    2. Reinstall requirements: `pip install -r requirements.txt --force-reinstall`
+    3. Check your Python version: `python --version` (must be 3.7+)
+  </Accordion>
+
+  <Accordion title="Groq API errors">
+    If you see API-related errors:
+    
+    1. Verify your `.env` file exists in the correct location
+    2. Ensure the API key is set correctly: `API=your_key_here`
+    3. Check your API key is valid at [console.groq.com](https://console.groq.com/)
+    4. Verify you haven't exceeded your API rate limits
+  </Accordion>
+</AccordionGroup>
+
+## What's Installed
+
+The installation includes:
+
+- **CLI interface** (`cli/cli.py`) - Command-line interface using Click
+- **Error tracing** (`errortrace.py`) - Captures and parses error output
+- **Relational context** (`relational.py`) - Builds dependency graphs for the `-r` flag
+- **AI processing** (`process/process.py`) - Communicates with Groq API
+- **Utilities** (`utils/`) - Helper functions for file parsing and context gathering
+
+## Next Steps
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Learn how to use splat to debug your first error
+</Card>

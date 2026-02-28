@@ -1,0 +1,188 @@
+---
+title: 'How Splat Works'
+description: 'Understanding the complete pipeline from error capture to AI-powered fixes'
+---
+
+## Overview
+
+Splat is an intelligent error analysis and debugging tool that automatically captures Python errors, gathers relevant context, and uses AI to suggest fixes. The tool works by executing your Python code in a controlled environment, analyzing any errors that occur, and providing structured solutions.
+
+## The Pipeline
+
+Splat follows a four-stage pipeline, orchestrated through `module.py`:
+
+```mermaid
+graph LR
+    A[Execute Python File] --> B[Capture Error]
+    B --> C[Parse & Gather Context]
+    C --> D[LLM Analysis]
+    D --> E[Structured Fix]
+```
+
+### Stage 1: Error Capture
+
+When you run `splat <-r> 'python3 filename.py'`, splat executes your Python file using `subprocess.run()` in a controlled environment (see `relational.py:15`).
+
+```python
+subprocess.run(entrypoint, capture_output=True, check=True, text=True)
+```
+
+If an error occurs, it's caught through a `CalledProcessError` exception, which contains:
+- **stderr**: The complete error traceback
+- **error information**: The original error message
+
+<Note>
+Splat only currently supports files that can be launched from the root directory of your project.
+</Note>
+
+### Stage 2: Error Parsing
+
+Once an error is captured, splat parses the error stack to extract file paths involved in the error (`utils.py:47-74`).
+
+<Accordion title="Error Stack Parsing Logic">
+The `parse_error_stack` function uses regex patterns to identify file paths:
+
+```python
+file_pattern = re.compile(r'(?:File "([^"]+)"|\b(\S+\.py)\b)')
+```
+
+This pattern matches:
+- Files referenced as `File "path/to/file.py"`
+- Direct `.py` file references in error messages
+
+Only files that exist on the filesystem are included in the results.
+</Accordion>
+
+### Stage 3: Context Gathering
+
+Depending on whether the `-r` (relational) flag is used, splat gathers different levels of context:
+
+<Tabs>
+  <Tab title="Without -r flag">
+    Collects only the files directly mentioned in the error traceback.
+    
+    ```python
+    return traceback, error_information, run_mock_repopack(collected_traceback_files)
+    ```
+  </Tab>
+  <Tab title="With -r flag">
+    Builds a dependency graph and includes all files connected to the error files through imports (see [Relational Context](/concepts/relational-context)).
+    
+    ```python
+    graph = build_adjacency_list(collected_traceback_files, project_root)
+    all_related_files = get_nth_related_files(collected_traceback_files, graph)
+    return traceback, error_information, run_mock_repopack(list(all_related_files))
+    ```
+  </Tab>
+</Tabs>
+
+The `run_mock_repopack` function reads all relevant files and packages their contents into a single string (`utils.py:81-100`).
+
+### Stage 4: LLM Analysis
+
+The collected context, traceback, and error information are sent to the LLM for analysis through the `process()` function in `process/process.py`.
+
+```python
+response: object = process(traceback, error_info, repopack)
+```
+
+The LLM (Groq with llama3-70b-8192) receives:
+- **Context**: Full contents of all relevant files
+- **Traceback message**: The complete error stack trace
+- **Original error message**: The error information
+
+And returns a structured JSON response with:
+- **where**: File location and line number
+- **what**: Error type and description
+- **how**: Suggested code solution
+
+See [AI Integration](/concepts/ai-integration) for more details.
+
+## Architecture Components
+
+### Main Module (`module.py`)
+
+The entry point that orchestrates the entire pipeline. Key responsibilities:
+- Accept CLI arguments (entrypoint and optional `-r` flag)
+- Call `relational_error_parsing_function` to capture and parse errors
+- Send data to LLM via `process()`
+- Return structured response to CLI
+
+### Relational Parser (`relational.py`)
+
+Handles error execution and context gathering:
+- Runs the Python file in a subprocess
+- Catches and extracts error information
+- Coordinates with utility functions to build dependency graphs
+- Manages conditional context gathering based on flags
+
+### Utilities (`utils/utils.py`)
+
+Provides core functionality:
+- `parse_error_stack()`: Extract file paths from tracebacks
+- `build_adjacency_list()`: Create import dependency graphs
+- `get_nth_related_files()`: Traverse graphs to find related files
+- `run_mock_repopack()`: Package file contents for LLM consumption
+
+### Process Module (`process/process.py`)
+
+Manages LLM integration:
+- Constructs prompts with system instructions
+- Sends context to Groq API
+- Receives and returns structured JSON responses
+
+## Git-Aware Processing
+
+Splat respects your project's `.gitignore` file when scanning for related files. The `is_project_file()` function ensures only files within your project root are analyzed (`utils.py:38-39`).
+
+```python
+def is_project_file(file_path: str, project_root: str) -> bool:
+    return os.path.commonpath([file_path, project_root]) == project_root
+```
+
+## Error Flow Example
+
+<Steps>
+  <Step title="Run Splat">
+    Execute: `splat -r 'python3 foo.py'`
+  </Step>
+  <Step title="Capture Error">
+    Splat runs `foo.py`, which throws a `NameError` on line 15
+  </Step>
+  <Step title="Parse Traceback">
+    Extract `foo.py` and `bar.py` (imported by foo) from error stack
+  </Step>
+  <Step title="Build Graph">
+    With `-r` flag, build adjacency list showing `foo.py` imports `bar.py` and `utils.py`
+  </Step>
+  <Step title="Gather Context">
+    Read contents of `foo.py`, `bar.py`, and `utils.py`
+  </Step>
+  <Step title="LLM Analysis">
+    Send context + error to Groq, receive structured fix suggestion
+  </Step>
+  <Step title="Display Result">
+    Show location, error description, and suggested code fix to user
+  </Step>
+</Steps>
+
+## Key Design Principles
+
+<CardGroup cols={2}>
+  <Card title="Controlled Execution" icon="shield">
+    Errors are captured in isolated subprocess environments to prevent crashes
+  </Card>
+  <Card title="Context Intelligence" icon="brain">
+    Gather only relevant files to minimize token usage while maximizing fix accuracy
+  </Card>
+  <Card title="Structured Output" icon="list">
+    LLM responses follow strict JSON schemas for consistent, parseable results
+  </Card>
+  <Card title="Project Awareness" icon="folder-tree">
+    Respects project structure and boundaries through root directory validation
+  </Card>
+</CardGroup>
+
+<Info>
+The pipeline is designed to be readable and modular. Each stage can be independently modified or extended without affecting other components.
+</Info>

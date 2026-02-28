@@ -1,0 +1,253 @@
+---
+title: Known Bugs and Limitations
+description: Current limitations and known issues in splat
+---
+
+## Known Bugs and Limitations
+
+This page documents current known bugs and limitations in splat. These are issues we're aware of and working to address in future releases.
+
+## Code Formatting Issues
+
+<Warning>
+**splat will not conform to any formatting configurations when inserting code**
+</Warning>
+
+### Description
+
+When splat suggests code fixes and inserts them into your files, it does not respect your project's code formatting configurations such as:
+- `.editorconfig` settings
+- `pyproject.toml` formatting rules (Black, isort, etc.)
+- Custom linting rules
+- Indentation preferences (tabs vs spaces)
+- Line length limits
+
+### Impact
+
+- Inserted code may not match your project's style
+- May cause linting errors or fail CI/CD checks
+- Manual reformatting required after code insertion
+- Could introduce inconsistencies in the codebase
+
+### Workarounds
+
+1. **Manual formatting after insertion:**
+   ```bash
+   # If using Black
+   black .
+   
+   # If using autopep8
+   autopep8 --in-place --aggressive --aggressive .
+   
+   # If using isort for imports
+   isort .
+   ```
+
+2. **Use splat for suggestions only:**
+   - Review the suggested code
+   - Manually copy and format it according to your standards
+   - Don't auto-apply fixes
+
+3. **Run formatters in your pre-commit hook:**
+   ```yaml
+   # .pre-commit-config.yaml
+   repos:
+     - repo: https://github.com/psf/black
+       rev: 23.0.0
+       hooks:
+         - id: black
+     - repo: https://github.com/pycqa/isort
+       rev: 5.12.0
+       hooks:
+         - id: isort
+   ```
+
+### Future Plans
+
+- Add support for reading and respecting common formatting configs
+- Integration with popular Python formatters
+- Option to specify formatting preferences via CLI flags
+
+---
+
+## Sub-Module Entrypoint Issues
+
+<Warning>
+**splat does not do well with running sub-module entrypoints that do not originate in the root directory**
+</Warning>
+
+### Description
+
+When you try to run a Python module or script that is located in a subdirectory (not the project root), splat may:
+- Fail to resolve imports correctly
+- Not find related files in the dependency graph
+- Produce incomplete or incorrect context for the AI
+- Miss critical files in the error analysis
+
+### Examples of Problematic Commands
+
+```bash
+# These may not work well:
+splat squash "python3 src/services/api/main.py"
+splat squash "python3 -m myproject.submodule.script"
+splat squash -r "cd src && python3 main.py"
+```
+
+### Why This Happens
+
+The issue stems from how splat resolves file paths and builds dependency graphs:
+
+1. **Project root detection:** 
+   - splat assumes it's run from the project root
+   - Uses `os.getcwd()` to determine the root (see `~/workspace/source/utils/utils.py:22`)
+
+2. **Import resolution:**
+   - The adjacency list builder resolves imports relative to project root
+   - May not handle Python's module resolution correctly for nested packages
+   - See `~/workspace/source/utils/utils.py:130-189`
+
+3. **Path comparison:**
+   - Uses `os.path.commonpath()` to verify files are in the project
+   - Can fail when entrypoint is in a subdirectory
+
+### Impact
+
+- Incomplete context sent to the AI
+- Missing related files in `-r` (recursive) mode
+- Incorrect file paths in error analysis
+- Less accurate debugging suggestions
+
+### Workarounds
+
+<Accordion title="1. Always run from project root">
+
+```bash
+# Instead of:
+cd src/services
+splat squash "python3 main.py"
+
+# Do this:
+cd /path/to/project/root
+splat squash "python3 src/services/main.py"
+```
+
+This ensures splat can correctly resolve all paths relative to the project root.
+
+</Accordion>
+
+<Accordion title="2. Use Python module syntax">
+
+```bash
+# Instead of:
+splat squash "python3 src/services/api/main.py"
+
+# Try:
+cd /path/to/project/root
+splat squash "python3 -m src.services.api.main"
+```
+
+This uses Python's module resolution, which may work better in some cases.
+
+</Accordion>
+
+<Accordion title="3. Create a root-level launcher script">
+
+Create `run_service.py` in your project root:
+
+```python
+# run_service.py
+import sys
+from src.services.api.main import main
+
+if __name__ == "__main__":
+    main()
+```
+
+Then run:
+```bash
+splat squash "python3 run_service.py"
+```
+
+</Accordion>
+
+<Accordion title="4. Avoid the -r flag for sub-modules">
+
+If you must run a sub-module entrypoint:
+
+```bash
+# Skip recursive dependency resolution
+splat squash "python3 src/services/api/main.py"
+```
+
+Without `-r`, splat only uses files from the error stack, which may be more reliable.
+
+</Accordion>
+
+### Future Plans
+
+- Improve project root detection
+- Better support for Python package structures
+- Handle `PYTHONPATH` and module resolution more intelligently
+- Add a `--root` flag to explicitly specify project root
+
+---
+
+## Other Limitations
+
+### Language Support
+
+<Info>
+While splat has framework detection for many languages (see `~/workspace/source/utils/utils.py:197-399`), **only Python is fully supported** for error parsing and context gathering.
+</Info>
+
+The `detect_framework_or_language()` function includes indicators for:
+- Go, Rust, Kotlin, Scala, Swift
+- JavaScript/TypeScript, Node.js
+- Java, C/C++
+- Ruby, PHP, Perl, R, Julia, Lua, Haskell
+- Frameworks: Next.js, React, Django, Flask, FastAPI, Express, Spring Boot, Laravel, etc.
+
+However, these are marked as "NOT IMPLEMENTED" and only Python error stacks are properly parsed.
+
+### Platform Support
+
+<Warning>
+Windows is not currently supported for terminal session features.
+</Warning>
+
+See the [Common Issues](/troubleshooting/common-issues#platform-specific-issues-windows-not-supported) page for workarounds.
+
+### Terminal Emulator Requirements
+
+- **macOS:** Requires Terminal.app (uses AppleScript)
+- **Linux:** Requires gnome-terminal
+
+Other terminal emulators (iTerm2, Alacritty, Kitty, etc.) are not currently supported.
+
+See: `~/workspace/source/cli/term_sesh.py:53-65`
+
+---
+
+## Reporting Bugs
+
+If you encounter a bug not listed here:
+
+1. Check if it's already reported on GitHub Issues
+2. Provide the following information:
+   - splat version
+   - Operating system and version
+   - Python version
+   - Full command you ran
+   - Complete error output
+   - Minimal reproducible example if possible
+
+## Contributing Fixes
+
+We welcome contributions! If you'd like to help fix any of these known issues:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Submit a pull request
+
+See the contributing guidelines in the repository for more details.

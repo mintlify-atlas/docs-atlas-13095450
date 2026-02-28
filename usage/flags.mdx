@@ -1,0 +1,328 @@
+---
+title: 'Flags'
+description: 'Command-line flags and options for controlling splat behavior'
+---
+
+## Overview
+
+Splat supports command-line flags to modify its behavior and control how context is gathered for AI analysis. Flags are optional and can be combined with any command.
+
+## Available Flags
+
+### -r (Relational Context)
+
+The relational context flag instructs splat to perform deep context gathering by analyzing import relationships between files.
+
+<ParamField path="-r" type="flag">
+  **Enable relational context gathering**
+  
+  When enabled, splat builds a dependency graph of all imports and collects code from files related to those in the error stack trace.
+</ParamField>
+
+#### Syntax
+
+```bash
+splat squash -r "<entrypoint>"
+```
+
+#### What It Does
+
+Without the `-r` flag, splat only analyzes files directly mentioned in the error traceback. With `-r` enabled:
+
+1. **Parses Error Stack**: Identifies all files in the error traceback
+2. **Builds Dependency Graph**: Analyzes Python import statements (`import`, `from...import`)
+3. **Finds Related Files**: Recursively discovers all imported modules
+4. **Collects Nth-Degree Connections**: Includes files imported by imported files, and so on
+5. **Gathers Context**: Reads and includes all related file contents
+
+#### How It Works Internally
+
+The relational context feature uses AST (Abstract Syntax Tree) parsing to analyze Python imports:
+
+```python
+# Without -r: Only analyzes the error file
+Error in main.py → Analyze main.py only
+
+# With -r: Analyzes the entire dependency chain
+Error in main.py → 
+  main.py imports utils.py → 
+    utils.py imports helpers.py → 
+      helpers.py imports config.py
+      
+Analyzes: main.py, utils.py, helpers.py, config.py
+```
+
+<Info>
+  The algorithm uses breadth-first search (BFS) to traverse the dependency graph, ensuring all related files are discovered efficiently.
+</Info>
+
+#### Implementation Details
+
+From `relational.py:13-30` and `utils/utils.py:108-189`, the relational context feature:
+
+- Builds an adjacency list representing file dependencies
+- Uses Python's `ast` module to parse import statements
+- Resolves relative and absolute imports
+- Handles module paths and packages
+- Respects project boundaries (only includes project files)
+- Gracefully handles syntax errors in imported files
+
+#### Performance Implications
+
+<Warning>
+  **Performance Considerations:**
+  
+  Using `-r` increases execution time and token usage:
+  - More files need to be read from disk
+  - Larger context sent to the AI model
+  - More tokens consumed from your Groq API quota
+  
+  For large projects, this can significantly impact response time.
+</Warning>
+
+<Tabs>
+  <Tab title="Small Projects">
+    For projects with 10-50 files:
+    - **Without -r**: ~0.5-1 second analysis
+    - **With -r**: ~1-2 seconds analysis
+    - **Token increase**: 2-5x
+  </Tab>
+
+  <Tab title="Medium Projects">
+    For projects with 50-200 files:
+    - **Without -r**: ~1-2 seconds analysis
+    - **With -r**: ~3-6 seconds analysis
+    - **Token increase**: 5-10x
+  </Tab>
+
+  <Tab title="Large Projects">
+    For projects with 200+ files:
+    - **Without -r**: ~2-3 seconds analysis
+    - **With -r**: ~8-15 seconds analysis
+    - **Token increase**: 10-20x
+    
+    Consider using without `-r` first for faster results.
+  </Tab>
+</Tabs>
+
+## Use Cases
+
+### When to Use -r
+
+<Accordion title="Complex Import Errors">
+  When errors involve imports or module relationships:
+
+  ```bash
+  splat squash -r "python3 main.py"
+  ```
+
+  **Example Error:**
+  ```
+  ImportError: cannot import name 'process_data' from 'utils.helpers'
+  ```
+
+  With `-r`, splat will analyze both the importing and imported files to understand the relationship.
+</Accordion>
+
+<Accordion title="Attribute Errors from Imported Objects">
+  When errors occur because of methods or attributes from imported modules:
+
+  ```bash
+  splat squash -r "python3 app.py"
+  ```
+
+  **Example Error:**
+  ```
+  AttributeError: 'DataProcessor' object has no attribute 'transform'
+  ```
+
+  The `-r` flag ensures splat includes the `DataProcessor` class definition for better context.
+</Accordion>
+
+<Accordion title="Type Errors with Custom Classes">
+  When custom classes or types are involved in errors:
+
+  ```bash
+  splat squash -r "python3 service.py"
+  ```
+
+  **Example Error:**
+  ```
+  TypeError: unsupported operand type(s) for +: 'User' and 'int'
+  ```
+
+  Including the `User` class definition helps the AI understand the type system.
+</Accordion>
+
+<Accordion title="Deep Dependency Chain Issues">
+  When errors cascade through multiple layers of imports:
+
+  ```bash
+  splat squash -r "python3 main.py"
+  ```
+
+  **Example:**
+  ```
+  main.py → imports service.py → imports repository.py → imports models.py
+  Error in models.py affects main.py
+  ```
+
+  The `-r` flag captures the entire chain for comprehensive analysis.
+</Accordion>
+
+### When NOT to Use -r
+
+<Note>
+  Skip the `-r` flag for faster results when:
+  
+  - **Syntax errors**: Simple typos or missing parentheses
+  - **Logic errors**: Issues contained in a single file
+  - **Quick iterations**: When rapidly testing fixes
+  - **Token conservation**: When managing API usage limits
+</Note>
+
+## Examples
+
+### Basic Error (No Flag Needed)
+
+```bash
+splat squash "python3 test.py"
+```
+
+**test.py:**
+```python test.py:1-2
+def hello():
+    print("hello"
+if __name__ == "__main__": hello()
+```
+
+**Error:**
+```
+File "test.py", line 2
+    print("hello"
+         ^
+SyntaxError: '(' was never closed
+```
+
+<Info>
+  This is a simple syntax error in a single file. No need for `-r` flag.
+</Info>
+
+### Import Error (Use -r Flag)
+
+```bash
+splat squash -r "python3 main.py"
+```
+
+**main.py:**
+```python main.py:1-5
+from utils.utils import parse_error_stack, build_adjacency_list
+from process.process import process
+
+error_files = parse_error_stack(error_info)
+result = process(error_files, context)
+```
+
+**Error:**
+```
+AttributeError: module 'utils.utils' has no attribute 'parse_error_stack'
+```
+
+<Info>
+  With `-r`, splat will include `utils/utils.py` to show available functions and help identify the correct import.
+</Info>
+
+### FastAPI Error with Dependencies (Use -r Flag)
+
+```bash
+splat squash -r "python3 main.py"
+```
+
+**main.py (FastAPI):**
+```python main.py:71-75
+@app.post("/process")
+async def process_data(data: dict):
+    # BUG: This endpoint doesn't properly handle missing keys
+    result = data['value1'] + data['value2']
+    return {"result": result}
+```
+
+**Error:**
+```
+KeyError: 'value1'
+```
+
+<Note>
+  For framework-specific errors, `-r` helps include configuration files, models, and route definitions for better context.
+</Note>
+
+## Flag Combinations
+
+Currently, splat supports only the `-r` flag. Future versions may include additional flags:
+
+```bash
+# Current
+splat squash -r "python3 main.py"
+
+# Future possibilities (not yet implemented)
+splat squash -r -v "python3 main.py"  # Verbose output
+splat squash -r --max-depth=2 "python3 main.py"  # Limit depth
+splat squash -r --exclude="tests/" "python3 main.py"  # Exclude patterns
+```
+
+<Warning>
+  Only the `-r` flag is currently implemented. Other flags shown above are conceptual examples.
+</Warning>
+
+## Best Practices
+
+### Start Without Flags
+
+For fastest results, always try without flags first:
+
+```bash
+# Try this first
+splat squash "python3 main.py"
+
+# If the error involves imports or related files, add -r
+splat squash -r "python3 main.py"
+```
+
+### Use -r for Production Debugging
+
+When debugging production issues where context matters:
+
+```bash
+splat squash -r "python3 manage.py runserver"
+```
+
+### Monitor Token Usage
+
+The `-r` flag significantly increases token consumption:
+
+- **Without -r**: ~500-2,000 tokens per request
+- **With -r**: ~2,000-20,000+ tokens per request
+
+<Info>
+  Groq provides generous free tier limits, but be mindful of usage in automated systems.
+</Info>
+
+## Technical Implementation
+
+The flag processing occurs in `relational.py:25-30`:
+
+```python relational.py:25-30
+if flag == '-r':
+  graph = build_adjacency_list(collected_traceback_files, project_root)
+  all_related_files = get_nth_related_files(collected_traceback_files, graph)
+  return traceback, error_information, run_mock_repopack(list(all_related_files))
+else:
+  return traceback, error_information, run_mock_repopack(collected_traceback_files)
+```
+
+The adjacency list builder in `utils/utils.py:130-189` handles:
+- AST parsing of Python files
+- Import statement extraction
+- Module path resolution
+- Recursive file discovery
+- Project boundary enforcement

@@ -1,0 +1,166 @@
+---
+title: Environment Setup
+description: Configure your environment to use splat CLI tool for AI-powered debugging
+---
+
+## Prerequisites
+
+Before installing splat, ensure your system meets the following requirements:
+
+- **Python**: Python 3.7 or higher
+- **pip**: Python package installer
+- **Git**: For repository awareness features
+
+## Installation
+
+<Steps>
+  <Step title="Create a Virtual Environment (Recommended)">
+    It's recommended to use a virtual environment to avoid dependency conflicts:
+
+    ```bash
+    # Create virtual environment
+    python3 -m venv venv
+
+    # Activate virtual environment
+    # On Linux/macOS:
+    source venv/bin/activate
+
+    # On Windows:
+    venv\Scripts\activate
+    ```
+  </Step>
+
+  <Step title="Clone the Repository">
+    Clone the splat repository to your local machine:
+
+    ```bash
+    git clone <repository-url>
+    cd splat
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all required dependencies from `requirements.txt`:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    <Note>
+      Key dependencies include:
+      - `groq` - Groq AI API client for fast inference
+      - `click` - CLI framework
+      - `python-dotenv` - Environment variable management
+      - `pydantic` & `pydantic_ai` - Data validation and AI agent framework
+      - `repopack` - Repository context gathering
+      - `fastapi` & `uvicorn` - API server components
+      - `prompt_toolkit` - Interactive terminal features
+    </Note>
+  </Step>
+
+  <Step title="Install splat CLI">
+    Install the splat command-line tool:
+
+    ```bash
+    pip install -e .
+    ```
+
+    This will make the `splat` command available globally in your environment.
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Create a `.env` file in your project root with required API credentials. See the [API Keys](/configuration/api-keys) page for details.
+  </Step>
+
+  <Step title="Verify Installation">
+    Verify that splat is installed correctly:
+
+    ```bash
+    splat version
+    ```
+
+    You should see output similar to:
+    ```
+    Zap CLI v0.1.0
+    ```
+  </Step>
+</Steps>
+
+## Configuration Files
+
+### config.toml
+
+The `config.toml` file can be used for additional configuration options. This file is optional and currently reserved for future configuration settings.
+
+### .env File
+
+The `.env` file stores your API credentials and configuration. This file should be created in your project root directory.
+
+<Warning>
+  Never commit your `.env` file to version control. Add it to your `.gitignore` to prevent accidentally exposing API keys.
+</Warning>
+
+Example `.env` file structure:
+
+```bash
+# Groq API Key (required)
+API=your_groq_api_key_here
+
+# Model configuration (optional)
+MODEL=groq/llama3-70b-8192
+API_KEY=your_groq_api_key_here
+```
+
+## Dependencies Overview
+
+Here's a complete list of dependencies from `requirements.txt`:
+
+| Package | Purpose |
+|---------|----------|
+| `click` | Command-line interface framework |
+| `repopack` | Repository context and file gathering |
+| `setuptools` | Package installation and distribution |
+| `virtualenv` | Virtual environment management |
+| `groq` | Groq AI API client for LLM inference |
+| `fastapi` | Web API framework |
+| `uvicorn` | ASGI server |
+| `python-dotenv` | Environment variable loading |
+| `prompt_toolkit` | Interactive terminal interface |
+| `requests` | HTTP library |
+| `black` | Code formatting |
+| `pydantic_ai` | AI agent framework |
+| `pydantic` | Data validation |
+| `zmq` | ZeroMQ messaging library |
+
+## Troubleshooting
+
+### Python Version Issues
+
+If you encounter issues with Python version compatibility:
+
+```bash
+# Check your Python version
+python3 --version
+
+# Ensure you're using Python 3.7+
+```
+
+### Dependency Conflicts
+
+If you experience dependency conflicts:
+
+1. Create a fresh virtual environment
+2. Install dependencies one at a time to identify conflicts
+3. Ensure you're using the latest pip: `pip install --upgrade pip`
+
+### Import Errors
+
+If you see import errors when running splat:
+
+```bash
+# Reinstall in editable mode
+pip install -e .
+
+# Or reinstall all dependencies
+pip install -r requirements.txt --force-reinstall
+```

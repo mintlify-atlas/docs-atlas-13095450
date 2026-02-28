@@ -1,0 +1,317 @@
+---
+title: "System Architecture"
+description: "Deep dive into splat's internal architecture, component breakdown, and data flow"
+---
+
+## Overview
+
+splat is a modular Python debugging tool built around a pipeline architecture that analyzes error tracebacks, gathers context, and applies automated fixes. The system is composed of several key components that work together to provide intelligent error correction.
+
+## High-Level Architecture
+
+The splat system follows a clear data flow pipeline:
+
+```
+CLI Input → Error Parsing → Context Gathering → LLM Processing → Agent Application → Terminal Feedback
+```
+
+<Note>
+  The architecture is designed to be extensible, allowing for easy addition of new agent types and error handling strategies.
+</Note>
+
+## Component Breakdown
+
+### 1. CLI Layer (`cli/`)
+
+The CLI layer handles user interaction and terminal integration:
+
+- **`cli.py`**: Main command-line interface
+- **`term_sesh.py`**: Terminal session management via tmux
+- **`process_monitor.py`**: Process monitoring and output capture
+- **`zap.py`**: Command execution utilities
+
+### 2. Core Pipeline (`module.py`)
+
+The main orchestration module that ties everything together:
+
+```python
+def main():
+    # CLI prompts user for entrypoint and flags
+    entrypoint: List[str] = ['python3', 'foo.py']
+    flag: str = "-r"  # -r enables relational scanning
+    
+    # Parse errors and build context
+    traceback, error_info, repopack = relational_error_parsing_function(
+        entrypoint, flag
+    )
+    
+    # Process with LLM
+    response: object = process(traceback, error_info, repopack)
+    
+    # Response is sent back to CLI for sequential application
+```
+
+<Accordion title="Understanding the -r Flag">
+  When splat is called with the `-r` (relational) flag, it scans not just the files in the error traceback, but also their Nth degree connections - all imported modules and related files. This provides richer context for the LLM.
+  
+  Without the flag, only files directly mentioned in the traceback are analyzed.
+</Accordion>
+
+### 3. Error Analysis (`relational.py`)
+
+Handles error capture and context gathering:
+
+```python
+def relational_error_parsing_function(entrypoint, flag: str = "") -> Tuple[str, str, str]:
+    try:
+        subprocess.run(entrypoint, capture_output=True, check=True, text=True)
+        return "", "", ""  # No error
+    except subprocess.CalledProcessError as error:
+        traceback: str = error.stderr if error.stderr else str(error)
+        error_information: str = str(error)
+        collected_traceback_files = parse_error_stack(traceback)
+        project_root = os.getcwd()
+        
+        if flag == '-r':
+            # Build dependency graph and get related files
+            graph = build_adjacency_list(collected_traceback_files, project_root)
+            all_related_files = get_nth_related_files(collected_traceback_files, graph)
+            return traceback, error_information, run_mock_repopack(list(all_related_files))
+        else:
+            return traceback, error_information, run_mock_repopack(collected_traceback_files)
+```
+
+**Key Functions:**
+- `parse_error_stack()`: Extracts file paths from Python tracebacks
+- `build_adjacency_list()`: Creates dependency graph of imports
+- `get_nth_related_files()`: Traverses graph to find connected files
+- `run_mock_repopack()`: Packages file contents for LLM context
+
+### 4. LLM Processing (`process/process.py`)
+
+Integrates with Groq LLM for error analysis:
+
+```python
+def process(traceback_message: str, original_error_information: str, context: str) -> object:
+    client = Groq(api_key=os.getenv("API"))
+    
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an expert software debugging assistant..."
+            },
+            # Structured prompts guide JSON response format
+        ],
+        model="llama3-70b-8192",
+        response_format={"type": "json_object"}
+    )
+    return chat_completion.choices[0].message.content
+```
+
+**Response Structure:**
+```json
+{
+  "where": {
+    "repository_path": "<absolute path>",
+    "file_name": "<filename>",
+    "line_number": "<line>"
+  },
+  "what": {
+    "error_type": "<error type>",
+    "description": "<explanation>"
+  },
+  "how": {
+    "error_origination": "<source line>",
+    "suggested_code_solution": "<fix code>"
+  }
+}
+```
+
+### 5. Agent System (`agents/`)
+
+Autonomous agents that apply fixes using the uagents framework:
+
+- **`agents.py`**: Bug zapper agent (pydantic-ai based)
+- **`file_writer_agent.py`**: File modification agent (uagents based)
+
+See the [Agents](/advanced/agents) page for detailed documentation.
+
+### 6. Handlers (`handlers/`)
+
+Specialized error handlers for different frameworks:
+
+- **`fastapi_handlers.py`**: FastAPI-specific error parsing and processing
+
+```python
+def parse_fastapi_error(error_info: str) -> Dict[str, List[str]]:
+    endpoints = []
+    error_types = []
+    
+    # Pattern for connection errors
+    error_pattern = r'Error accessing endpoint (/\w+): (.+)'
+    matches = re.findall(error_pattern, error_info)
+    
+    for match in matches:
+        endpoint, error_type = match
+        endpoints.append(endpoint)
+        error_types.append(error_type)
+    
+    return {
+        "endpoints": list(dict.fromkeys(endpoints)),
+        "error_types": list(dict.fromkeys(error_types))
+    }
+```
+
+### 7. Utilities (`utils/`)
+
+Helper functions for graph building, file parsing, and context gathering:
+
+- `build_adjacency_list()`: Import graph construction
+- `parse_error_stack()`: Traceback parsing
+- `run_mock_repopack()`: File content packaging
+- `get_nth_related_files()`: Graph traversal
+
+## Data Flow
+
+<Steps>
+  <Step title="User Execution">
+    User runs `splat <?-r> 'python3 script.py'` from CLI
+  </Step>
+  
+  <Step title="Error Capture">
+    `relational_error_parsing_function()` runs the command in a subprocess and captures stderr output
+  </Step>
+  
+  <Step title="Context Building">
+    - Parse error stack to extract file paths
+    - Build dependency graph (if `-r` flag)
+    - Package file contents with repopack
+  </Step>
+  
+  <Step title="LLM Analysis">
+    `process()` sends traceback + context to Groq LLM and receives structured JSON response with fix
+  </Step>
+  
+  <Step title="Agent Application">
+    File writer agent applies the suggested code fix to the correct file and line number
+  </Step>
+  
+  <Step title="Terminal Feedback">
+    Output is displayed in tmux terminal session monitored by ProcessMonitor
+  </Step>
+</Steps>
+
+## Directory Structure
+
+```
+source/
+├── agents/              # Agent implementations
+│   ├── agents.py       # Bug zapper agent (pydantic-ai)
+│   └── file_writer_agent.py  # File modification agent (uagents)
+├── cli/                # Command-line interface
+│   ├── cli.py         # Main CLI
+│   ├── term_sesh.py   # Terminal session management
+│   ├── process_monitor.py  # Process monitoring
+│   └── zap.py         # Command utilities
+├── handlers/           # Framework-specific handlers
+│   └── fastapi_handlers.py
+├── process/            # LLM processing
+│   ├── process.py     # Main LLM interface
+│   └── agent_handler.py
+├── terminalout/        # Terminal output management
+│   └── terminal.py
+├── utils/              # Utility functions
+│   └── utils.py
+├── module.py           # Main pipeline orchestration
+├── relational.py       # Error parsing and context gathering
+└── errortrace.py       # Error tracing utilities
+```
+
+## Integration Points
+
+### External Dependencies
+
+1. **Groq API**: LLM provider for error analysis
+2. **tmux**: Terminal multiplexer for session management
+3. **ZMQ**: Messaging layer for terminal communication
+4. **uagents**: Agent framework by Fetch.ai
+5. **pydantic-ai**: AI agent framework with structured outputs
+
+### Communication Protocols
+
+<CodeGroup>
+
+```python ZMQ Publisher/Subscriber
+# Terminal session publishes output
+self.publisher = self.context.socket(zmq.PUB)
+self.publisher.bind(f"tcp://*:{port}")
+
+# Send code segments
+self.publisher.send_json({
+    'file_path': 'path/to/file',
+    'code': compressed_code,
+    'metadata': {...},
+    'action': 'analyze/edit/debug'
+})
+```
+
+```python REST API (Agent)
+# File writer agent exposes REST endpoint
+@file_writer.on_rest_post(
+    "/apply_correction", 
+    ErrorCorrectionRequest, 
+    ErrorCorrectionResponse
+)
+async def handle_error_correction(
+    ctx: Context, 
+    request: ErrorCorrectionRequest
+) -> ErrorCorrectionResponse:
+    # Apply correction logic
+    pass
+```
+
+</CodeGroup>
+
+## Module Responsibilities
+
+| Module | Responsibility | Key Functions |
+|--------|---------------|---------------|
+| `module.py` | Pipeline orchestration | `main()` |
+| `relational.py` | Error parsing & context | `relational_error_parsing_function()` |
+| `process/process.py` | LLM interaction | `process()` |
+| `agents/file_writer_agent.py` | Code modification | `apply_error_correction()` |
+| `cli/term_sesh.py` | Terminal management | `open_new_terminal()`, `send_to_terminal()` |
+| `cli/process_monitor.py` | Output monitoring | `monitor_tmux()` |
+| `handlers/fastapi_handlers.py` | Framework handlers | `parse_fastapi_error()` |
+| `utils/utils.py` | Graph & file utilities | `build_adjacency_list()`, `parse_error_stack()` |
+
+<Warning>
+  The `module.py` file is NOT meant to be run directly. It's a readable representation of the splat pipeline. The actual CLI entry point is through the installed `splat` command.
+</Warning>
+
+## Design Patterns
+
+### Pipeline Pattern
+The system uses a clear pipeline pattern where data flows through distinct stages: capture → parse → analyze → fix → apply.
+
+### Agent Pattern
+Autonomous agents handle specialized tasks (file writing, error correction) with their own lifecycle and message handling.
+
+### Publisher-Subscriber
+Terminal output is broadcasted via ZMQ pub-sub pattern, allowing multiple subscribers to monitor execution.
+
+### Dependency Injection
+Agents receive context and dependencies through structured message models, enabling clean separation of concerns.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent System" icon="robot" href="/advanced/agents">
+    Learn about the uagents-based file writer and correction system
+  </Card>
+  
+  <Card title="Terminal Integration" icon="terminal" href="/advanced/terminal-integration">
+    Understand tmux session management and process monitoring
+  </Card>
+</CardGroup>

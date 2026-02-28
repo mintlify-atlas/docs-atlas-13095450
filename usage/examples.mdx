@@ -1,0 +1,654 @@
+---
+title: 'Examples'
+description: 'Real-world usage scenarios and examples for debugging with splat'
+---
+
+## Overview
+
+This guide provides practical examples of using splat across different project types, error scenarios, and use cases. Each example includes the command, error output, and expected results.
+
+## Python Examples
+
+### Simple Syntax Error
+
+<Accordion title="Unclosed Parenthesis">
+  **Scenario**: Basic Python syntax error with missing parenthesis.
+
+  **test.py:**
+  ```python test.py
+  def hello():
+      print("hello"
+  if __name__ == "__main__":    hello()
+  ```
+
+  **Command:**
+  ```bash
+  splat squash "python3 test.py"
+  ```
+
+  **Error Output:**
+  ```
+  File "test.py", line 2
+      print("hello"
+           ^
+  SyntaxError: '(' was never closed
+  ```
+
+  **AI Response:**
+  ```json
+  {
+    "where": {
+      "repository_path": "/home/user/project",
+      "file_name": "test.py",
+      "line_number": "2"
+    },
+    "what": {
+      "error_type": "SyntaxError",
+      "description": "The opening parenthesis in the print statement was not closed"
+    },
+    "how": {
+      "error_origination": "2",
+      "suggested_code_solution": "    print(\"hello\")"
+    }
+  }
+  ```
+
+  <Info>
+    For simple syntax errors, the `-r` flag is not needed as the error is contained in a single file.
+  </Info>
+</Accordion>
+
+### Import and Module Errors
+
+<Accordion title="Attribute Error from Import">
+  **Scenario**: Attempting to import a function that doesn't exist in the target module.
+
+  **main.py:**
+  ```python main.py
+  from utils.utils import parse_error_stack, build_graph  # Wrong function name
+  
+  error_info = "File test.py, line 2"
+  files = parse_error_stack(error_info)
+  graph = build_graph(files)  # Should be build_adjacency_list
+  ```
+
+  **Command (with relational flag):**
+  ```bash
+  splat squash -r "python3 main.py"
+  ```
+
+  **Error Output:**
+  ```
+  Traceback (most recent call last):
+    File "main.py", line 1, in <module>
+      from utils.utils import parse_error_stack, build_graph
+  ImportError: cannot import name 'build_graph' from 'utils.utils'
+  ```
+
+  **Why use -r:**
+  The `-r` flag includes the `utils/utils.py` file content, allowing the AI to see available functions and suggest the correct import.
+
+  **Expected Fix:**
+  ```python
+  from utils.utils import parse_error_stack, build_adjacency_list
+  ```
+</Accordion>
+
+<Accordion title="Relative Import Error">
+  **Scenario**: Using relational context to debug relative imports.
+
+  **module.py:**
+  ```python module.py
+  from relational import relational_error_parsing_function
+  from process.process import process
+  
+  entrypoint = ['python3', 'foo.py']
+  flag = "-r"
+  traceback, error_info, repopack = relational_error_parsing_function(entrypoint, flag)
+  response = process(traceback, error_info, repopack)
+  ```
+
+  **Command:**
+  ```bash
+  splat squash -r "python3 module.py"
+  ```
+
+  <Note>
+    The `-r` flag ensures splat analyzes `relational.py` and `process/process.py` to understand the full execution flow.
+  </Note>
+</Accordion>
+
+### Type and Value Errors
+
+<Accordion title="KeyError in Dictionary Access">
+  **Scenario**: FastAPI endpoint with missing dictionary key.
+
+  **main.py:**
+  ```python main.py
+  from fastapi import FastAPI
+  
+  app = FastAPI()
+  
+  @app.post("/process")
+  async def process_data(data: dict):
+      # BUG: This endpoint doesn't properly handle missing keys
+      result = data['value1'] + data['value2']
+      return {"result": result}
+  ```
+
+  **Test request:**
+  ```bash
+  curl -X POST http://localhost:8000/process -H "Content-Type: application/json" -d '{"value1": 10}'
+  ```
+
+  **Command:**
+  ```bash
+  splat squash "python3 main.py"
+  ```
+
+  **Error Output:**
+  ```
+  KeyError: 'value2'
+    File "main.py", line 8, in process_data
+      result = data['value1'] + data['value2']
+  ```
+
+  **Suggested Fix:**
+  ```python
+  @app.post("/process")
+  async def process_data(data: dict):
+      # Handle missing keys with .get() or validate with Pydantic
+      result = data.get('value1', 0) + data.get('value2', 0)
+      return {"result": result}
+  ```
+</Accordion>
+
+<Accordion title="TypeError with Custom Objects">
+  **Scenario**: Using `-r` to analyze custom class definitions.
+
+  **models.py:**
+  ```python models.py
+  class User:
+      def __init__(self, id: int, name: str):
+          self.id = id
+          self.name = name
+  ```
+
+  **main.py:**
+  ```python main.py
+  from models import User
+  
+  user = User(1, "Alice")
+  result = user + 5  # TypeError: unsupported operand
+  ```
+
+  **Command:**
+  ```bash
+  splat squash -r "python3 main.py"
+  ```
+
+  **Why use -r:**
+  Including the `User` class definition helps the AI understand that the class doesn't support addition operations.
+</Accordion>
+
+## Framework-Specific Examples
+
+### FastAPI
+
+<Tabs>
+  <Tab title="Random Server Error">
+    **Scenario**: Endpoint that randomly raises exceptions.
+
+    **main.py:**
+    ```python main.py
+    import random
+    from fastapi import FastAPI, HTTPException
+    
+    app = FastAPI()
+    
+    @app.get("/users")
+    async def get_users():
+        # BUG: This endpoint will randomly fail
+        if random.random() < 0.5:
+            raise HTTPException(status_code=500, detail="Random server error")
+        return users
+    ```
+
+    **Command:**
+    ```bash
+    splat squash "python3 main.py"
+    ```
+
+    **When error occurs:**
+    ```
+    HTTPException: 500: Random server error
+    ```
+
+    The AI will suggest removing the random error logic and implementing proper error handling.
+  </Tab>
+
+  <Tab title="Type Validation Error">
+    **Scenario**: Response model validation fails due to incorrect types.
+
+    **main.py:**
+    ```python main.py
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+    from typing import List
+    
+    class Item(BaseModel):
+        id: int
+        name: str
+        price: float
+    
+    items = [
+        Item(id=1, name="Laptop", price=999.99),
+        Item(id=2, name="Phone", price=499.99),
+    ]
+    
+    @app.get("/items", response_model=List[Item])
+    async def get_items():
+        # BUG: Returns incorrect types
+        return [{"id": "not_an_int", "name": item.name, "price": str(item.price)} 
+                for item in items]
+    ```
+
+    **Error:**
+    ```
+    ValidationError: value is not a valid integer
+    ```
+
+    **Command:**
+    ```bash
+    splat squash -r "python3 main.py"
+    ```
+  </Tab>
+
+  <Tab title="Missing User Error">
+    **Scenario**: Endpoint returns None instead of raising 404.
+
+    **main.py:**
+    ```python main.py
+    @app.get("/user/{user_id}")
+    async def get_user(user_id: int):
+        # BUG: This endpoint doesn't properly handle non-existent users
+        user = next((u for u in users if u.id == user_id), None)
+        return user  # Returns None if not found
+    ```
+
+    **Better approach:**
+    ```python
+    @app.get("/user/{user_id}")
+    async def get_user(user_id: int):
+        user = next((u for u in users if u.id == user_id), None)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+    ```
+  </Tab>
+</Tabs>
+
+### Django
+
+<CodeGroup>
+```bash Django Dev Server
+splat squash "python manage.py runserver"
+```
+
+```bash Django Migration Error
+splat squash -r "python manage.py migrate"
+```
+
+```bash Django Shell
+splat squash "python manage.py shell"
+```
+</CodeGroup>
+
+### Flask
+
+```bash
+splat squash "python app.py"
+```
+
+**Common Flask error:**
+```python app.py
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/process')
+def process():
+    data = request.json  # Error: 'request' is not defined
+    return {'result': data['value']}
+```
+
+**Command:**
+```bash
+splat squash -r "python app.py"
+```
+
+## JavaScript/TypeScript Examples
+
+### Node.js
+
+<Accordion title="Undefined Variable">
+  **server.js:**
+  ```javascript server.js
+  const express = require('express');
+  const app = express();
+  
+  app.get('/api/data', (req, res) => {
+      // Error: userId is not defined
+      console.log(userId);
+      res.json({ data: 'hello' });
+  });
+  
+  app.listen(3000);
+  ```
+
+  **Command:**
+  ```bash
+  splat squash "node server.js"
+  ```
+
+  **Error:**
+  ```
+  ReferenceError: userId is not defined
+      at /path/to/server.js:5:17
+  ```
+</Accordion>
+
+### TypeScript
+
+```bash
+splat squash "tsx index.ts"
+```
+
+<Info>
+  Splat detects TypeScript files (`.ts`, `.tsx`) and provides appropriate context.
+</Info>
+
+## Multi-Language Projects
+
+### Language Detection
+
+Splat automatically detects your project language based on:
+
+1. **Command**: `python3`, `node`, `go run`, `cargo run`, etc.
+2. **File extensions**: `.py`, `.js`, `.ts`, `.go`, `.rs`, etc.
+3. **Project files**: `package.json`, `go.mod`, `Cargo.toml`, etc.
+
+<Tabs>
+  <Tab title="Python">
+    ```bash
+    splat squash "python3 main.py"
+    ```
+    Detects: `.py` files, Python imports
+  </Tab>
+
+  <Tab title="Go">
+    ```bash
+    splat squash "go run main.go"
+    ```
+    Detects: `.go` files, `go.mod`
+  </Tab>
+
+  <Tab title="Rust">
+    ```bash
+    splat squash "cargo run"
+    ```
+    Detects: `.rs` files, `Cargo.toml`
+  </Tab>
+
+  <Tab title="Next.js">
+    ```bash
+    splat squash "npm run dev"
+    ```
+    Detects: `next.config.js`, React components
+  </Tab>
+</Tabs>
+
+## Before/After Scenarios
+
+### Scenario 1: Off-by-One Error
+
+<CodeGroup>
+```python Before
+@app.put("/item/{item_id}")
+async def update_item(item_id: int, item: Item):
+    for i, existing_item in enumerate(items):
+        if existing_item.id == item_id + 1:  # BUG: Off-by-one
+            items[i] = item
+            return {"message": "Item updated successfully"}
+    raise HTTPException(status_code=404, detail="Item not found")
+```
+
+```python After
+@app.put("/item/{item_id}")
+async def update_item(item_id: int, item: Item):
+    for i, existing_item in enumerate(items):
+        if existing_item.id == item_id:  # Fixed
+            items[i] = item
+            return {"message": "Item updated successfully"}
+    raise HTTPException(status_code=404, detail="Item not found")
+```
+</CodeGroup>
+
+**Command used:**
+```bash
+splat squash "python3 main.py"
+```
+
+### Scenario 2: Import Chain Error
+
+<Tabs>
+  <Tab title="Before">
+    **File structure:**
+    ```
+    project/
+    ├── main.py (imports utils)
+    ├── utils.py (imports helpers - wrong name)
+    └── helper.py (correct name)
+    ```
+
+    **utils.py:**
+    ```python
+    from helpers import process  # Wrong: file is helper.py
+    ```
+
+    **Error:**
+    ```
+    ModuleNotFoundError: No module named 'helpers'
+    ```
+  </Tab>
+
+  <Tab title="After">
+    **utils.py (fixed):**
+    ```python
+    from helper import process  # Correct
+    ```
+
+    **How splat helped:**
+    ```bash
+    splat squash -r "python3 main.py"
+    ```
+
+    The `-r` flag analyzed the project structure and identified available modules.
+  </Tab>
+</Tabs>
+
+## Complex Real-World Example
+
+### Full Application Debug Session
+
+<Accordion title="Multi-File Python Application">
+  **Project structure:**
+  ```
+  project/
+  ├── main.py
+  ├── relational.py
+  ├── module.py
+  ├── utils/
+  │   └── utils.py
+  └── process/
+      └── process.py
+  ```
+
+  **Step 1: Initial error**
+  ```bash
+  splat squash "python3 module.py"
+  ```
+
+  **Error in module.py:**
+  ```python module.py
+  from relational import relational_error_parsing_function
+  from process.process import process
+  
+  entrypoint = ['python3', 'foo.py']
+  flag = "-r"
+  traceback, error_info, repopack = relational_error_parsing_function(entrypoint, flag)
+  response = process(traceback, error_info, repopack)
+  ```
+
+  **Output:**
+  ```
+  subprocess.CalledProcessError: Command '['python3', 'foo.py']' returned non-zero exit status 1.
+  ```
+
+  **Step 2: Use relational context**
+  ```bash
+  splat squash -r "python3 module.py"
+  ```
+
+  Now splat includes:
+  - `module.py` (main file)
+  - `relational.py` (imported)
+  - `process/process.py` (imported)
+  - `utils/utils.py` (imported by relational.py)
+
+  **AI identifies:** The error is in `foo.py`, and the entrypoint file doesn't exist.
+
+  **Step 3: Fix and rerun**
+  Change to an existing file:
+  ```python
+  entrypoint = ['python3', 'test.py']  # Existing file
+  ```
+</Accordion>
+
+## Output Examples
+
+### Successful Debug Output
+
+```json
+{
+  "where": {
+    "repository_path": "/home/user/project",
+    "file_name": "main.py",
+    "line_number": "42"
+  },
+  "what": {
+    "error_type": "AttributeError",
+    "description": "The 'User' object does not have a 'transform' attribute. This may be a typo or the method was not defined in the User class."
+  },
+  "how": {
+    "error_origination": "42",
+    "suggested_code_solution": "user.process()  # Use the correct method name"
+  }
+}
+```
+
+### No Error Output
+
+```bash
+splat squash "python3 working_app.py"
+```
+
+**Result:**
+```
+Traceback: ""
+Error Info: ""
+Context: ""
+```
+
+<Note>
+  If your application runs successfully, splat returns empty strings since there's nothing to debug.
+</Note>
+
+## Best Practices from Examples
+
+### 1. Start Simple
+
+```bash
+# Always try without flags first
+splat squash "python3 main.py"
+
+# Add -r only if needed
+splat squash -r "python3 main.py"
+```
+
+### 2. Use Relational Context for Imports
+
+<Info>
+  Use `-r` whenever the error mentions:
+  - `ImportError`
+  - `ModuleNotFoundError`
+  - `AttributeError` on imported objects
+  - Function or class from another file
+</Info>
+
+### 3. Match Your Normal Workflow
+
+```bash
+# If you normally run:
+python3 manage.py runserver
+
+# Then use splat with:
+splat squash "python3 manage.py runserver"
+```
+
+### 4. Iterate Quickly
+
+Splat is designed for rapid iteration:
+
+```bash
+# 1. Run splat
+splat squash "python3 app.py"
+
+# 2. Apply suggested fix
+# 3. Run splat again
+splat squash "python3 app.py"
+
+# 4. Repeat until fixed
+```
+
+## Common Patterns
+
+### Pattern 1: Syntax Error Fix
+
+```bash
+splat squash "python3 file.py"
+# → Fix syntax
+# → Success
+```
+
+### Pattern 2: Import Resolution
+
+```bash
+splat squash "python3 main.py"
+# → Shows import error
+splat squash -r "python3 main.py"
+# → Shows available imports
+# → Fix import
+# → Success
+```
+
+### Pattern 3: Multi-Step Debug
+
+```bash
+splat squash -r "python3 app.py"
+# → Fix error 1
+splat squash -r "python3 app.py"
+# → Fix error 2
+splat squash -r "python3 app.py"
+# → Success
+```
