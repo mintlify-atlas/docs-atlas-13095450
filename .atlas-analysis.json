@@ -1,0 +1,75 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "splat",
+  "projectDescription": "AI-powered debugging tool that analyzes compile/runtime errors with intelligent context gathering and automatic fixes",
+  "theme": "aspen",
+  "primaryColor": "#FF6B35",
+  "lightColor": "#FFA07A",
+  "darkColor": "#D84315",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Usage",
+        "pages": [
+          "usage/commands",
+          "usage/flags",
+          "usage/examples"
+        ]
+      },
+      {
+        "group": "Core Concepts",
+        "pages": [
+          "concepts/how-it-works",
+          "concepts/relational-context",
+          "concepts/error-analysis",
+          "concepts/ai-integration"
+        ]
+      },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/environment",
+          "configuration/api-keys"
+        ]
+      },
+      {
+        "group": "Advanced",
+        "pages": [
+          "advanced/architecture",
+          "advanced/agents",
+          "advanced/terminal-integration"
+        ]
+      },
+      {
+        "group": "Troubleshooting",
+        "pages": [
+          "troubleshooting/common-issues",
+          "troubleshooting/known-bugs",
+          "troubleshooting/faq"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "AI-optimized error debugging with Groq inference",
+    "Relational context gathering with -r flag for Nth degree file connections",
+    "Git-aware file processing that respects .gitignore",
+    "Automatic code fixing with intelligent file writer agents",
+    "Interactive terminal session management via tmux integration",
+    "Multi-framework support for Python, JavaScript, TypeScript, and more"
+  ],
+  "publicApiSurface": [
+    "splat squash <entrypoint>",
+    "splat squash -r <entrypoint>",
+    "splat --version",
+    "splat --help"
+  ]
+}
